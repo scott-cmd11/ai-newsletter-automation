@@ -1,6 +1,6 @@
-# 🇨🇦 AI This Week — Newsletter Generator
+# AI This Week — Newsletter Generator
 
-An open-source, automated pipeline that generates a weekly AI briefing for Canadian public-sector readers. Searches multiple sources, verifies links, scrapes content, and uses LLM summarization to produce a polished, Outlook-ready newsletter.
+An open-source, automated pipeline that generates a weekly AI briefing. Searches multiple sources, verifies links, scrapes content, and uses LLM summarization to produce a polished, Outlook-ready newsletter.
 
 **[Live App →](https://ai-newsletter-automation.vercel.app)** *(deploy your own — see below)*
 
@@ -15,12 +15,14 @@ An open-source, automated pipeline that generates a weekly AI briefing for Canad
 
 ## Quick Start (Vercel)
 
+> **⚠️ Required:** The app will not work without API keys set in Vercel. Both keys below are free-tier eligible.
+
 1. **Fork** this repo on GitHub
 2. **Import** it in [Vercel](https://vercel.com)
-3. **Set environment variables** in Vercel project settings:
+3. **Set environment variables** in Vercel → Project Settings → Environment Variables:
    - `TAVILY_API_KEY` — get one at [tavily.com](https://tavily.com)
    - `GROQ_API_KEY` — get one at [console.groq.com](https://console.groq.com)
-4. **Deploy** — Vercel will handle the rest
+4. **Redeploy** after adding the keys — Vercel will handle the rest
 
 ## Local Development
 
