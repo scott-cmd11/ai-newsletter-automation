@@ -1,0 +1,165 @@
+/* ============================================
+   AI This Week — Frontend Logic
+   ============================================ */
+
+const SECTIONS = [
+    { key: "trending", label: "Trending AI" },
+    { key: "canadian", label: "Canadian News" },
+    { key: "global", label: "Global News" },
+    { key: "events", label: "Events" },
+    { key: "events_public", label: "Public-Servant Events" },
+    { key: "agri", label: "Grain / Agri-Tech" },
+    { key: "ai_progress", label: "AI Progress" },
+    { key: "research_plain", label: "Plain-Language Research" },
+    { key: "deep_dive", label: "Deep Dive" },
+];
+
+let generatedHTML = null;
+
+/* ── Helpers ────────────────────────────── */
+
+function $(id) { return document.getElementById(id); }
+
+function setVisible(id, show) {
+    $(id).style.display = show ? "" : "none";
+}
+
+function setChipState(key, state) {
+    const chip = document.querySelector(`[data-key="${key}"]`);
+    if (!chip) return;
+    chip.className = "section-chip " + state;
+
+    const iconEl = chip.querySelector(".chip-icon");
+    if (state === "active") {
+        iconEl.innerHTML = '<div class="spinner"></div>';
+    } else if (state === "done") {
+        iconEl.innerHTML = '<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><polyline points="20,6 9,17 4,12"/></svg>';
+    } else if (state === "error") {
+        iconEl.innerHTML = '<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></svg>';
+    }
+}
+
+/* ── Progress UI ────────────────────────── */
+
+function initProgress() {
+    const grid = $("section-status");
+    grid.innerHTML = SECTIONS.map(s =>
+        `<div class="section-chip" data-key="${s.key}">
+            <span class="chip-icon">
+                <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" opacity="0.4"><circle cx="12" cy="12" r="10"/></svg>
+            </span>
+            <span>${s.label}</span>
+        </div>`
+    ).join("");
+
+    $("progress-bar").style.width = "0%";
+    $("progress-count").textContent = `0 / ${SECTIONS.length}`;
+    $("progress-text").textContent = "Starting generation…";
+    setVisible("progress-container", true);
+    setVisible("error-container", false);
+    setVisible("result-container", false);
+}
+
+function updateProgress(completed, currentLabel) {
+    const pct = (completed / SECTIONS.length) * 100;
+    $("progress-bar").style.width = pct + "%";
+    $("progress-count").textContent = `${completed} / ${SECTIONS.length}`;
+    $("progress-text").textContent = currentLabel
+        ? `Generating: ${currentLabel}…`
+        : "Complete!";
+}
+
+/* ── Generate ───────────────────────────── */
+
+async function generateNewsletter() {
+    const days = parseInt($("days-input").value) || 7;
+    const generateBtn = $("generate-btn");
+    const downloadBtn = $("download-btn");
+
+    generateBtn.disabled = true;
+    downloadBtn.disabled = true;
+    generatedHTML = null;
+
+    initProgress();
+
+    const allSections = {};
+    let completed = 0;
+    let hasErrors = false;
+
+    for (const section of SECTIONS) {
+        setChipState(section.key, "active");
+        updateProgress(completed, section.label);
+
+        try {
+            const resp = await fetch(`/api/generate_section?key=${section.key}&days=${days}`);
+            if (!resp.ok) {
+                const err = await resp.json().catch(() => ({ error: resp.statusText }));
+                throw new Error(err.error || `HTTP ${resp.status}`);
+            }
+
+            const data = await resp.json();
+            allSections[section.key] = data.items || [];
+            setChipState(section.key, "done");
+        } catch (err) {
+            console.error(`Section ${section.key} failed:`, err);
+            setChipState(section.key, "error");
+            allSections[section.key] = [];
+            hasErrors = true;
+        }
+
+        completed++;
+        updateProgress(completed, completed < SECTIONS.length ? SECTIONS[completed]?.label : null);
+    }
+
+    // Render the full newsletter
+    $("progress-text").textContent = "Rendering newsletter…";
+
+    try {
+        const today = new Date().toISOString().slice(0, 10);
+        const renderResp = await fetch("/api/render", {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({ sections: allSections, run_date: today }),
+        });
+
+        if (!renderResp.ok) {
+            throw new Error(`Render failed: HTTP ${renderResp.status}`);
+        }
+
+        generatedHTML = await renderResp.text();
+
+        // Display in iframe
+        const frame = $("newsletter-frame");
+        frame.srcdoc = generatedHTML;
+        $("result-date").textContent = today;
+        setVisible("result-container", true);
+        downloadBtn.disabled = false;
+
+        updateProgress(SECTIONS.length, null);
+        $("progress-text").textContent = hasErrors
+            ? "Done with some errors — check highlighted sections"
+            : "✓ Newsletter generated successfully!";
+
+    } catch (err) {
+        $("error-text").textContent = `Render error: ${err.message}`;
+        setVisible("error-container", true);
+    }
+
+    generateBtn.disabled = false;
+}
+
+/* ── Download ───────────────────────────── */
+
+function downloadHTML() {
+    if (!generatedHTML) return;
+
+    const blob = new Blob([generatedHTML], { type: "text/html" });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement("a");
+    a.href = url;
+    a.download = `ai-this-week-${new Date().toISOString().slice(0, 10)}.html`;
+    document.body.appendChild(a);
+    a.click();
+    document.body.removeChild(a);
+    URL.revokeObjectURL(url);
+}

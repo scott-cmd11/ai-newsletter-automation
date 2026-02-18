@@ -1,0 +1,88 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <title>AI This Week — Newsletter Generator</title>
+    <meta name="description" content="Automated AI newsletter generator for Canadian public-sector stakeholders. Powered by Tavily search and Groq LLM.">
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&display=swap" rel="stylesheet">
+    <link rel="stylesheet" href="style.css">
+</head>
+<body>
+    <!-- Header -->
+    <header class="header">
+        <div class="header-inner">
+            <div class="logo">
+                <span class="logo-flag">🇨🇦</span>
+                <div>
+                    <h1 class="logo-title">AI This Week</h1>
+                    <p class="logo-subtitle">Automated AI Briefing for Canadian Public Service</p>
+                </div>
+            </div>
+            <a href="https://github.com/scottgriffinm/ai-newsletter-automation" target="_blank" class="github-link" title="View on GitHub">
+                <svg width="24" height="24" viewBox="0 0 24 24" fill="currentColor"><path d="M12 0C5.37 0 0 5.37 0 12c0 5.31 3.435 9.795 8.205 11.385.6.105.825-.255.825-.57 0-.285-.015-1.23-.015-2.235-3.015.555-3.795-.735-4.035-1.41-.135-.345-.72-1.41-1.23-1.695-.42-.225-1.02-.78-.015-.795.945-.015 1.62.87 1.845 1.23 1.08 1.815 2.805 1.305 3.495.99.105-.78.42-1.305.765-1.605-2.67-.3-5.46-1.335-5.46-5.925 0-1.305.465-2.385 1.23-3.225-.12-.3-.54-1.53.12-3.18 0 0 1.005-.315 3.3 1.23.96-.27 1.98-.405 3-.405s2.04.135 3 .405c2.295-1.56 3.3-1.23 3.3-1.23.66 1.65.24 2.88.12 3.18.765.84 1.23 1.905 1.23 3.225 0 4.605-2.805 5.625-5.475 5.925.435.375.81 1.095.81 2.22 0 1.605-.015 2.895-.015 3.3 0 .315.225.69.825.57A12.02 12.02 0 0024 12c0-6.63-5.37-12-12-12z"/></svg>
+            </a>
+        </div>
+    </header>
+
+    <!-- Controls -->
+    <main class="main">
+        <div class="controls-card">
+            <div class="controls-row">
+                <div class="control-group">
+                    <label for="days-input" class="control-label">Search Window</label>
+                    <div class="input-with-suffix">
+                        <input type="number" id="days-input" value="7" min="1" max="30" class="control-input">
+                        <span class="input-suffix">days</span>
+                    </div>
+                </div>
+                <div class="control-group control-actions">
+                    <button id="generate-btn" class="btn btn-primary" onclick="generateNewsletter()">
+                        <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polygon points="13,2 3,14 12,14 11,22 21,10 12,10"/></svg>
+                        Generate Newsletter
+                    </button>
+                    <button id="download-btn" class="btn btn-secondary" onclick="downloadHTML()" disabled>
+                        <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="7,10 12,15 17,10"/><line x1="12" y1="15" x2="12" y2="3"/></svg>
+                        Download HTML
+                    </button>
+                </div>
+            </div>
+        </div>
+
+        <!-- Progress -->
+        <div id="progress-container" class="progress-container" style="display: none;">
+            <div class="progress-header">
+                <span id="progress-text" class="progress-label">Generating...</span>
+                <span id="progress-count" class="progress-count">0 / 9</span>
+            </div>
+            <div class="progress-bar-bg">
+                <div id="progress-bar" class="progress-bar-fill"></div>
+            </div>
+            <div id="section-status" class="section-status-grid"></div>
+        </div>
+
+        <!-- Error -->
+        <div id="error-container" class="error-container" style="display: none;">
+            <p id="error-text"></p>
+        </div>
+
+        <!-- Result -->
+        <div id="result-container" class="result-container" style="display: none;">
+            <div class="result-header">
+                <h2 class="result-title">Generated Newsletter</h2>
+                <span id="result-date" class="result-date"></span>
+            </div>
+            <iframe id="newsletter-frame" class="newsletter-frame"></iframe>
+        </div>
+    </main>
+
+    <!-- Footer -->
+    <footer class="footer">
+        <p>Open-source AI newsletter pipeline · Powered by <a href="https://tavily.com" target="_blank">Tavily</a> & <a href="https://groq.com" target="_blank">Groq</a></p>
+    </footer>
+
+    <script src="app.js"></script>
+</body>
+</html>

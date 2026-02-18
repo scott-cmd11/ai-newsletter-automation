@@ -1,0 +1,18 @@
+{
+    "functions": {
+        "api/*.py": {
+            "runtime": "@vercel/python",
+            "maxDuration": 60
+        }
+    },
+    "routes": [
+        {
+            "src": "/api/(.*)",
+            "dest": "/api/$1"
+        },
+        {
+            "src": "/(.*)",
+            "dest": "/public/$1"
+        }
+    ]
+}

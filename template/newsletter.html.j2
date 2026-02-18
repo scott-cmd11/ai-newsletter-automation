@@ -1,0 +1,45 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <meta charset="utf-8">
+    <title>AI This Week</title>
+    <style>
+        body { font-family: Arial, sans-serif; color: #0f172a; margin: 0; padding: 24px; background: #f8fafc; }
+        h1 { color: #0a3d91; margin-bottom: 0; }
+        h2 { color: #0a3d91; border-bottom: 2px solid #0a3d91; padding-bottom: 4px; }
+        table { width: 100%; border-collapse: collapse; }
+        td { vertical-align: top; padding: 8px; }
+        .section { margin-top: 24px; background: #ffffff; border: 1px solid #e2e8f0; border-radius: 6px; padding: 12px; }
+        .headline { font-weight: 700; }
+        .dot { color: #0a3d91; margin-right: 6px; }
+        .footer { color: #475569; font-size: 12px; margin-top: 24px; }
+        a { color: #0a3d91; text-decoration: none; }
+    </style>
+</head>
+<body>
+    <h1>🇨🇦 AI This Week</h1>
+    <div><strong>Date:</strong> {{ run_date }}</div>
+
+    {% for section_key, items in sections.items() %}
+    <div class="section">
+        <h2>{{ section_key|replace("_"," ")|title }}</h2>
+        <table>
+            {% for item in items %}
+            <tr>
+                <td width="32%"><span class="dot">•</span><span class="headline">{{ item.Headline }}</span></td>
+                <td width="68%">
+                    {{ item.Summary_Text }}<br>
+                    <a href="{{ item.Live_Link }}">Read more</a>
+                    {% if item.Date %}<div><strong>Date:</strong> {{ item.Date }}</div>{% endif %}
+                </td>
+            </tr>
+            {% endfor %}
+        </table>
+    </div>
+    {% endfor %}
+
+    <div class="footer">
+        Prepared for Government of Canada stakeholders. Please review for policy sensitivity before sending.
+    </div>
+</body>
+</html>
