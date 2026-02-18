@@ -18,6 +18,7 @@ class VerifiedArticle:
     url: str
     snippet: str
     content: str
+    published: Optional[str] = None
 
 
 @dataclass

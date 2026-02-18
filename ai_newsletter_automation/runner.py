@@ -79,6 +79,7 @@ def process_hits(hits: List[ArticleHit], limit: int, log_file: Path) -> List[Ver
                 url=hit.url,
                 snippet=hit.snippet,
                 content=content,
+                published=hit.published,
             )
         )
     return verified

@@ -10,9 +10,10 @@ from .models import SummaryItem, VerifiedArticle
 
 SYSTEM_PROMPT_BASE = """You are a concise analyst producing copy for a weekly AI briefing.
 Requirements:
-- Output ONLY valid JSON array (no prose) of objects with keys: "Headline", "Summary_Text", "Live_Link", "Relevance"{date_key}.
+- Output ONLY valid JSON array (no prose) of objects with keys: "Headline", "Summary_Text", "Live_Link", "Relevance", "Date".
 - "Summary_Text" must be 1-2 crisp sentences, neutral tone, no sales language.
 - "Relevance" must be an integer 1-10 rating of how relevant and timely the article is for a weekly AI briefing. Rate 8-10 for breaking news or major announcements from the past week, 5-7 for useful but not urgent, 1-4 for old, generic, or off-topic content.
+- "Date" must be the article's publication date in YYYY-MM-DD format. Use the Published date provided with each article. If no date is available, use your best estimate but never omit this field.
 - Preserve URLs exactly as provided — use the specific article URL, never a homepage or generic domain.
 - Do not invent facts or links; rely solely on provided article content.
 - SKIP articles that are clearly outdated (mentioning dates from months/years ago as recent), generic overview pages (Wikipedia, "What is AI?" articles), or have no substantive news content.
@@ -22,7 +23,8 @@ Requirements:
 def _build_prompt(articles: List[VerifiedArticle]) -> str:
     lines = []
     for art in articles:
-        lines.append(f"Title: {art.title}\nURL: {art.url}\nSnippet: {art.snippet}\nContent: {art.content[:4000]}")
+        pub_line = f"\nPublished: {art.published}" if art.published else ""
+        lines.append(f"Title: {art.title}\nURL: {art.url}{pub_line}\nSnippet: {art.snippet}\nContent: {art.content[:4000]}")
     return "\n\n".join(lines)
 
 
@@ -39,8 +41,8 @@ def _parse_json(raw: str) -> List[SummaryItem]:
     items: List[SummaryItem] = []
     for obj in data:
         relevance = int(obj.get("Relevance", 5))
-        # Filter out low-relevance items
-        if relevance < 5:
+        # Filter out low-relevance items (6+ = useful)
+        if relevance < 6:
             continue
         items.append(
             SummaryItem(
@@ -84,7 +86,6 @@ def summarize_section(
         return []
 
     settings = get_settings()
-    date_key = ', and "Date" (YYYY-MM-DD) if present' if require_date else ""
     extra_rules = ""
     if section_key == "research_plain":
         extra_rules = (
@@ -95,8 +96,8 @@ def summarize_section(
             "\n- Mention the benchmark or metric and what improved; one sentence impact for government services."
         )
     elif section_key in {"events_public", "events"}:
-        extra_rules = "\n- Highlight what/when/who in one sentence; include Date in JSON."
-    system_prompt = SYSTEM_PROMPT_BASE.format(date_key=date_key) + extra_rules
+        extra_rules = "\n- Highlight what/when/who in one sentence."
+    system_prompt = SYSTEM_PROMPT_BASE + extra_rules
 
     user_prompt = f"Section: {section_name}\nToday's date: {time.strftime('%Y-%m-%d')}\nSummarize the following verified articles:\n{_build_prompt(articles)}"
 

@@ -14,6 +14,7 @@
         .dot { color: #0a3d91; margin-right: 6px; }
         .footer { color: #475569; font-size: 12px; margin-top: 24px; }
         a { color: #0a3d91; text-decoration: none; }
+        .article-date { color: #64748b; font-size: 12px; margin-left: 6px; }
     </style>
 </head>
 <body>
@@ -26,11 +27,13 @@
         <table>
             {% for item in items %}
             <tr>
-                <td width="32%"><span class="dot">•</span><span class="headline">{{ item.Headline }}</span></td>
+                <td width="32%">
+                    <span class="dot">•</span><span class="headline">{{ item.Headline }}</span>
+                    {% if item.Date %}<span class="article-date">· {{ item.Date }}</span>{% endif %}
+                </td>
                 <td width="68%">
                     {{ item.Summary_Text }}<br>
                     <a href="{{ item.Live_Link }}">Read more</a>
-                    {% if item.Date %}<div><strong>Date:</strong> {{ item.Date }}</div>{% endif %}
                 </td>
             </tr>
             {% endfor %}

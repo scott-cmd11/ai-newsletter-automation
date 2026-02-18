@@ -4,7 +4,7 @@ from typing import Dict, List, Optional, Iterable
 
 import requests
 import feedparser
-from urllib.parse import urlparse, urlunparse
+from urllib.parse import urlparse, urlunparse, parse_qs, unquote
 
 from .config import get_settings
 from .models import ArticleHit, SectionConfig
@@ -147,12 +147,15 @@ def _parse_date_str(date_str: Optional[str]) -> Optional[datetime]:
 
 def _filter_by_date(hits: List[ArticleHit], days: int) -> List[ArticleHit]:
     """Remove hits whose published date is outside the search window.
-    Hits with no parseable date are kept (benefit of doubt)."""
+    Hits with no parseable date are REJECTED to prevent stale content."""
     cutoff = datetime.utcnow() - timedelta(days=days)
     filtered = []
     for h in hits:
         pub = _parse_date_str(h.published)
-        if pub is not None and pub < cutoff:
+        if pub is None:
+            # No date — reject to avoid stale/evergreen content
+            continue
+        if pub < cutoff:
             continue
         filtered.append(h)
     return filtered
@@ -231,7 +234,11 @@ def fetch_hn_trending(limit: int = 30, days: int = 7) -> List[ArticleHit]:
             url = item.get("url") or f"https://news.ycombinator.com/item?id={story_id}"
             if _is_blocked_url(url):
                 continue
-            hits.append(ArticleHit(title=title, url=url, snippet="Hacker News trending"))
+            pub_dt = datetime.utcfromtimestamp(item_time)
+            hits.append(ArticleHit(
+                title=title, url=url, snippet="Hacker News trending",
+                published=pub_dt.strftime("%Y-%m-%dT%H:%M:%S"),
+            ))
             if len(hits) >= limit:
                 break
         except Exception:
@@ -354,6 +361,22 @@ def fetch_curated_feeds(limit: int = 10, days: int = 7) -> List[ArticleHit]:
     return hits
 
 
+def _unwrap_google_redirect(url: str) -> str:
+    """Extract the real article URL from a Google Alerts redirect wrapper.
+    Google Alerts links look like: https://www.google.com/url?...&url=REAL_URL&...
+    Returns the original URL unchanged if it's not a redirect."""
+    try:
+        parsed = urlparse(url)
+        if parsed.hostname and "google.com" in parsed.hostname and parsed.path == "/url":
+            params = parse_qs(parsed.query)
+            real = params.get("url") or params.get("q")
+            if real:
+                return unquote(real[0])
+    except Exception:
+        pass
+    return url
+
+
 def fetch_google_alerts(section_key: str, limit: int = 15, days: int = 7) -> List[ArticleHit]:
     """Fetch articles from Google Alert RSS feeds mapped to a newsletter section."""
     urls = GOOGLE_ALERT_FEEDS.get(section_key, [])
@@ -374,7 +397,8 @@ def fetch_google_alerts(section_key: str, limit: int = 15, days: int = 7) -> Lis
                     continue
             else:
                 continue
-            link = entry.get("link", "")
+            # Unwrap Google redirect to get the real article URL
+            link = _unwrap_google_redirect(entry.get("link", ""))
             if _is_blocked_url(link):
                 continue
             hits.append(
@@ -483,14 +507,24 @@ def collect_research(days: int) -> List[ArticleHit]:
 # ── AI Progress ──
 
 
-def _fetch_pwc_trending(limit: int = 10) -> List[ArticleHit]:
+def _fetch_pwc_trending(limit: int = 10, days: int = 30) -> List[ArticleHit]:
     rss_url = "https://paperswithcode.com/trending?format=rss"
+    cutoff = datetime.utcnow() - timedelta(days=days)
     try:
         feed = feedparser.parse(rss_url)
     except Exception:
         return []
     hits: List[ArticleHit] = []
-    for entry in feed.entries[:limit]:
+    for entry in feed.entries[:limit * 2]:
+        # Date filter
+        published = entry.get("published_parsed") or entry.get("updated_parsed")
+        if published:
+            pub_dt = datetime(*published[:6])
+            if pub_dt < cutoff:
+                continue
+        else:
+            # No date — skip to avoid stale content
+            continue
         url = entry.get("link", "")
         if _is_blocked_url(url):
             continue
@@ -500,14 +534,17 @@ def _fetch_pwc_trending(limit: int = 10) -> List[ArticleHit]:
                 url=url,
                 snippet=entry.get("summary", "")[:400],
                 source="PapersWithCode",
+                published=entry.get("published"),
             )
         )
+        if len(hits) >= limit:
+            break
     return hits
 
 
 def collect_ai_progress(days: int) -> List[ArticleHit]:
     hits: List[ArticleHit] = []
-    hits.extend(_fetch_pwc_trending(limit=15))
+    hits.extend(_fetch_pwc_trending(limit=15, days=days))
     return _dedupe(hits)
 
 
