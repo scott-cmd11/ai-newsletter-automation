@@ -62,7 +62,7 @@ def summarize_section(
     section_name: str,
     articles: List[VerifiedArticle],
     require_date: bool = False,
-    model: str = "llama-3.1-70b-versatile",
+    model: str = "llama-3.3-70b-versatile",
     section_key: str = "",
 ) -> List[SummaryItem]:
     if not articles:
