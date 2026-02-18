@@ -8,12 +8,15 @@ from .config import get_settings
 from .models import SummaryItem, VerifiedArticle
 
 
-SYSTEM_PROMPT_BASE = """You are a concise analyst producing copy for a Canadian public-sector weekly AI briefing.
+SYSTEM_PROMPT_BASE = """You are a concise analyst producing copy for a weekly AI briefing.
 Requirements:
-- Output ONLY valid JSON array (no prose) of objects with keys: "Headline", "Summary_Text", "Live_Link"{date_key}.
+- Output ONLY valid JSON array (no prose) of objects with keys: "Headline", "Summary_Text", "Live_Link", "Relevance"{date_key}.
 - "Summary_Text" must be 1-2 crisp sentences, neutral tone, no sales language.
-- Preserve URLs exactly as provided.
-- Do not invent facts or links; rely solely on provided article content."""
+- "Relevance" must be an integer 1-10 rating of how relevant and timely the article is for a weekly AI briefing. Rate 8-10 for breaking news or major announcements from the past week, 5-7 for useful but not urgent, 1-4 for old, generic, or off-topic content.
+- Preserve URLs exactly as provided — use the specific article URL, never a homepage or generic domain.
+- Do not invent facts or links; rely solely on provided article content.
+- SKIP articles that are clearly outdated (mentioning dates from months/years ago as recent), generic overview pages (Wikipedia, "What is AI?" articles), or have no substantive news content.
+- If an article has no meaningful content or the URL points to a homepage rather than a specific article, omit it entirely."""
 
 
 def _build_prompt(articles: List[VerifiedArticle]) -> str:
@@ -24,9 +27,21 @@ def _build_prompt(articles: List[VerifiedArticle]) -> str:
 
 
 def _parse_json(raw: str) -> List[SummaryItem]:
-    data = json.loads(raw)
+    # Handle markdown-wrapped JSON
+    cleaned = raw.strip()
+    if cleaned.startswith("```"):
+        cleaned = cleaned.split("\n", 1)[1] if "\n" in cleaned else cleaned[3:]
+        if cleaned.endswith("```"):
+            cleaned = cleaned[:-3]
+        cleaned = cleaned.strip()
+
+    data = json.loads(cleaned)
     items: List[SummaryItem] = []
     for obj in data:
+        relevance = int(obj.get("Relevance", 5))
+        # Filter out low-relevance items
+        if relevance < 5:
+            continue
         items.append(
             SummaryItem(
                 Headline=obj.get("Headline", "").strip(),
@@ -83,7 +98,7 @@ def summarize_section(
         extra_rules = "\n- Highlight what/when/who in one sentence; include Date in JSON."
     system_prompt = SYSTEM_PROMPT_BASE.format(date_key=date_key) + extra_rules
 
-    user_prompt = f"Section: {section_name}\nSummarize the following verified articles:\n{_build_prompt(articles)}"
+    user_prompt = f"Section: {section_name}\nToday's date: {time.strftime('%Y-%m-%d')}\nSummarize the following verified articles:\n{_build_prompt(articles)}"
 
     messages = [
         {"role": "system", "content": system_prompt},
@@ -103,7 +118,7 @@ def summarize_section(
             {
                 "model": model,
                 "temperature": 0.2,
-                "max_tokens": 1200,
+                "max_tokens": 1500,
                 "messages": messages,
             },
         )

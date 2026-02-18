@@ -5,6 +5,7 @@ from pathlib import Path
 from typing import Dict, List, Callable, Optional
 
 import click
+import requests
 
 from .assemble import render_newsletter
 from .config import get_settings
@@ -98,7 +99,30 @@ def process_section(key: str, days: int, max_per_stream: Optional[int] = None) -
         hits = search_stream(cfg, search_days)
 
     verified = process_hits(hits, cfg.limit, log_file)
-    return summarize_section(cfg.name, verified, require_date=cfg.require_date, section_key=key)
+    items = summarize_section(cfg.name, verified, require_date=cfg.require_date, section_key=key)
+
+    # Post-verify: confirm each Live_Link is still reachable
+    alive_items: List[SummaryItem] = []
+    for item in items:
+        if not item.Live_Link:
+            continue
+        try:
+            resp = requests.head(item.Live_Link, timeout=5, allow_redirects=True,
+                                 headers={"User-Agent": "Mozilla/5.0 (compatible; AI-Newsletter/1.0)"})
+            if resp.status_code < 400:
+                alive_items.append(item)
+        except Exception:
+            # If HEAD fails, try GET as a fallback (some servers block HEAD)
+            try:
+                resp = requests.get(item.Live_Link, timeout=5, allow_redirects=True, stream=True,
+                                    headers={"User-Agent": "Mozilla/5.0 (compatible; AI-Newsletter/1.0)"})
+                resp.close()
+                if resp.status_code < 400:
+                    alive_items.append(item)
+            except Exception:
+                continue
+
+    return alive_items
 
 
 @click.command()

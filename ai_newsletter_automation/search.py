@@ -10,6 +10,30 @@ from .config import get_settings
 from .models import ArticleHit, SectionConfig
 
 
+# ── Domain blocklist — evergreen / non-news pages that pollute results ──
+
+BLOCKED_DOMAINS = {
+    "en.wikipedia.org",
+    "wikipedia.org",
+    "investopedia.com",
+    "techopedia.com",
+    "builtin.com",
+    "coursera.org",
+    "udemy.com",
+    "medium.com",       # often paywalled or generic
+    "quora.com",
+}
+
+BLOCKED_URL_PATTERNS = (
+    "/wiki/",
+    "/about",
+    "/contact",
+    "/careers",
+    "/privacy",
+    "/terms",
+)
+
+
 DEFAULT_STREAMS: Dict[str, SectionConfig] = {
     "trending": SectionConfig(
         name="Trending AI",
@@ -63,14 +87,88 @@ DEFAULT_STREAMS: Dict[str, SectionConfig] = {
 }
 
 
+# ── Helpers ──
+
+
 def _since_timestamp(days: int) -> str:
     cutoff = datetime.utcnow() - timedelta(days=days)
     return cutoff.strftime("%Y-%m-%d")
 
 
+def _is_blocked_url(url: str) -> bool:
+    """Return True if the URL belongs to a blocked domain or matches a blocked pattern."""
+    try:
+        parsed = urlparse(url)
+        domain = parsed.hostname or ""
+        if any(domain.endswith(b) for b in BLOCKED_DOMAINS):
+            return True
+        path = parsed.path.lower()
+        if any(p in path for p in BLOCKED_URL_PATTERNS):
+            return True
+    except Exception:
+        pass
+    return False
+
+
+def _normalize_url(url: str) -> str:
+    try:
+        parsed = urlparse(url)
+        cleaned = parsed._replace(query="", fragment="")
+        return urlunparse(cleaned)
+    except Exception:
+        return url
+
+
+def _dedupe(hits: List[ArticleHit]) -> List[ArticleHit]:
+    seen = set()
+    unique = []
+    for h in hits:
+        key = (_normalize_url(h.url).lower(), h.title.strip().lower())
+        if key in seen:
+            continue
+        seen.add(key)
+        unique.append(h)
+    return unique
+
+
+def _parse_date_str(date_str: Optional[str]) -> Optional[datetime]:
+    """Best-effort parse of a date string into a datetime object."""
+    if not date_str:
+        return None
+    for fmt in ("%Y-%m-%dT%H:%M:%S", "%Y-%m-%d", "%a, %d %b %Y %H:%M:%S %z",
+                "%a, %d %b %Y %H:%M:%S", "%Y-%m-%dT%H:%M:%S%z",
+                "%Y-%m-%dT%H:%M:%SZ"):
+        try:
+            return datetime.strptime(date_str.strip()[:25], fmt)
+        except (ValueError, AttributeError):
+            continue
+    return None
+
+
+def _filter_by_date(hits: List[ArticleHit], days: int) -> List[ArticleHit]:
+    """Remove hits whose published date is outside the search window.
+    Hits with no parseable date are kept (benefit of doubt)."""
+    cutoff = datetime.utcnow() - timedelta(days=days)
+    filtered = []
+    for h in hits:
+        pub = _parse_date_str(h.published)
+        if pub is not None and pub < cutoff:
+            continue
+        filtered.append(h)
+    return filtered
+
+
+def _filter_blocked(hits: List[ArticleHit]) -> List[ArticleHit]:
+    """Remove hits from blocked domains or URL patterns."""
+    return [h for h in hits if not _is_blocked_url(h.url)]
+
+
+# ── Tavily search ──
+
+
 def search_stream(section: SectionConfig, days: int) -> List[ArticleHit]:
     settings = get_settings()
-    max_results = settings.max_per_stream or section.limit * 2
+    max_results = settings.max_per_stream or section.limit * 3
 
     payload = {
         "query": section.query,
@@ -96,41 +194,22 @@ def search_stream(section: SectionConfig, days: int) -> List[ArticleHit]:
                 published=res.get("published_date"),
             )
         )
+
+    # Post-filter: date + blocked domains
+    hits = _filter_blocked(hits)
+    hits = _filter_by_date(hits, days)
     return hits
 
 
-# ---------- Helpers ----------
-
-
-def _normalize_url(url: str) -> str:
-    try:
-        parsed = urlparse(url)
-        cleaned = parsed._replace(query="", fragment="")
-        return urlunparse(cleaned)
-    except Exception:
-        return url
-
-
-def _dedupe(hits: List[ArticleHit]) -> List[ArticleHit]:
-    seen = set()
-    unique = []
-    for h in hits:
-        key = (_normalize_url(h.url).lower(), h.title.strip().lower())
-        if key in seen:
-            continue
-        seen.add(key)
-        unique.append(h)
-    return unique
-
-
-# ---------- Trending Collectors ----------
+# ── Trending Collectors ──
 
 
 HN_API_BASE = "https://hacker-news.firebaseio.com/v0"
-AI_KEYWORDS = ("ai", "artificial", "llm", "model", "gpt", "transformer")
+AI_KEYWORDS = ("ai", "artificial", "llm", "model", "gpt", "transformer", "openai", "anthropic", "gemini")
 
 
-def fetch_hn_trending(limit: int = 30) -> List[ArticleHit]:
+def fetch_hn_trending(limit: int = 30, days: int = 7) -> List[ArticleHit]:
+    cutoff_ts = (datetime.utcnow() - timedelta(days=days)).timestamp()
     try:
         top_ids = requests.get(f"{HN_API_BASE}/topstories.json", timeout=10).json()[: limit * 2]
         best_ids = requests.get(f"{HN_API_BASE}/beststories.json", timeout=10).json()[: limit]
@@ -145,7 +224,13 @@ def fetch_hn_trending(limit: int = 30) -> List[ArticleHit]:
             title = item.get("title", "")
             if not title or not any(k in title.lower() for k in AI_KEYWORDS):
                 continue
+            # Date filter: reject items older than the search window
+            item_time = item.get("time", 0)
+            if item_time < cutoff_ts:
+                continue
             url = item.get("url") or f"https://news.ycombinator.com/item?id={story_id}"
+            if _is_blocked_url(url):
+                continue
             hits.append(ArticleHit(title=title, url=url, snippet="Hacker News trending"))
             if len(hits) >= limit:
                 break
@@ -154,21 +239,37 @@ def fetch_hn_trending(limit: int = 30) -> List[ArticleHit]:
     return hits
 
 
-def fetch_producthunt_trending(limit: int = 10) -> List[ArticleHit]:
+def fetch_producthunt_trending(limit: int = 10, days: int = 7) -> List[ArticleHit]:
     rss_url = "https://www.producthunt.com/feeds/topic/artificial-intelligence"
+    cutoff = datetime.utcnow() - timedelta(days=days)
     try:
         feed = feedparser.parse(rss_url)
     except Exception:
         return []
     hits: List[ArticleHit] = []
-    for entry in feed.entries[:limit]:
+    for entry in feed.entries[:limit * 2]:
+        # Date filter
+        published = entry.get("published_parsed") or entry.get("updated_parsed")
+        if published:
+            pub_dt = datetime(*published[:6])
+            if pub_dt < cutoff:
+                continue
+        elif not published:
+            # No date available — skip to avoid stale content
+            continue
+        url = entry.get("link", "")
+        if _is_blocked_url(url):
+            continue
         hits.append(
             ArticleHit(
                 title=entry.get("title", ""),
-                url=entry.get("link", ""),
+                url=url,
                 snippet="Product Hunt AI launch",
+                published=entry.get("published"),
             )
         )
+        if len(hits) >= limit:
+            break
     return hits
 
 
@@ -199,10 +300,16 @@ def fetch_curated_feeds(limit: int = 10, days: int = 7) -> List[ArticleHit]:
                 pub_dt = datetime(*published[:6])
                 if pub_dt < cutoff:
                     continue
+            else:
+                # No date — skip to avoid stale content
+                continue
+            link = entry.get("link", "")
+            if _is_blocked_url(link):
+                continue
             hits.append(
                 ArticleHit(
                     title=entry.get("title", ""),
-                    url=entry.get("link", ""),
+                    url=link,
                     snippet=entry.get("summary", "")[:500],
                     published=entry.get("published"),
                 )
@@ -216,8 +323,8 @@ def fetch_curated_feeds(limit: int = 10, days: int = 7) -> List[ArticleHit]:
 
 def collect_trending(days: int) -> List[ArticleHit]:
     hits: List[ArticleHit] = []
-    hits.extend(fetch_hn_trending(limit=20))
-    hits.extend(fetch_producthunt_trending(limit=10))
+    hits.extend(fetch_hn_trending(limit=20, days=days))
+    hits.extend(fetch_producthunt_trending(limit=10, days=days))
     hits.extend(fetch_curated_feeds(limit=15, days=days))
     # Tavily fallback
     trending_cfg = SectionConfig(name="Trending AI", query='"AI" AND ("top news" OR trending) AND week', limit=8)
@@ -225,7 +332,7 @@ def collect_trending(days: int) -> List[ArticleHit]:
     return _dedupe(hits)
 
 
-# ---------- Events Public (CSPS) ----------
+# ── Events Public (CSPS) ──
 
 
 CSPS_DOMAINS = ["csps-efpc.gc.ca", "canada.ca"]
@@ -250,10 +357,13 @@ def collect_events_public(days: int) -> List[ArticleHit]:
 
     hits: List[ArticleHit] = []
     for res in data.get("results", []):
+        url = res.get("url", "")
+        if _is_blocked_url(url):
+            continue
         hits.append(
             ArticleHit(
                 title=res.get("title", "").strip(),
-                url=res.get("url", ""),
+                url=url,
                 snippet=res.get("content", "").strip(),
                 source=res.get("source"),
                 published=res.get("published_date"),
@@ -262,7 +372,7 @@ def collect_events_public(days: int) -> List[ArticleHit]:
     return _dedupe(hits)
 
 
-# ---------- Research Plain ----------
+# ── Research Plain ──
 
 
 def collect_research(days: int) -> List[ArticleHit]:
@@ -280,6 +390,9 @@ def collect_research(days: int) -> List[ArticleHit]:
                 pub_dt = datetime(*published[:6])
                 if pub_dt < cutoff:
                     continue
+            else:
+                # No date — skip
+                continue
             hits.append(
                 ArticleHit(
                     title=entry.get("title", "").replace("\n", " ").strip(),
@@ -296,7 +409,7 @@ def collect_research(days: int) -> List[ArticleHit]:
     return _dedupe(hits)
 
 
-# ---------- AI Progress ----------
+# ── AI Progress ──
 
 
 def _fetch_pwc_trending(limit: int = 10) -> List[ArticleHit]:
@@ -307,10 +420,13 @@ def _fetch_pwc_trending(limit: int = 10) -> List[ArticleHit]:
         return []
     hits: List[ArticleHit] = []
     for entry in feed.entries[:limit]:
+        url = entry.get("link", "")
+        if _is_blocked_url(url):
+            continue
         hits.append(
             ArticleHit(
                 title=entry.get("title", ""),
-                url=entry.get("link", ""),
+                url=url,
                 snippet=entry.get("summary", "")[:400],
                 source="PapersWithCode",
             )
@@ -321,7 +437,6 @@ def _fetch_pwc_trending(limit: int = 10) -> List[ArticleHit]:
 def collect_ai_progress(days: int) -> List[ArticleHit]:
     hits: List[ArticleHit] = []
     hits.extend(_fetch_pwc_trending(limit=15))
-    # Future: add LMSYS/MLPerf/Epoch if reachable; safe to keep minimal for now.
     return _dedupe(hits)
 
 
