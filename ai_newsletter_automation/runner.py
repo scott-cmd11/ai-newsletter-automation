@@ -19,6 +19,9 @@ from .search import (
     collect_events_public,
     collect_research,
     collect_ai_progress,
+    collect_canadian,
+    collect_agri,
+    collect_global,
 )
 from .summarize import summarize_section
 from .verify import verify_link
@@ -100,6 +103,9 @@ def process_section(key: str, days: int, max_per_stream: Optional[int] = None) -
         "events_public": lambda c: collect_events_public(c.days or 30),
         "research_plain": lambda c: collect_research(c.days or days),
         "ai_progress": lambda c: collect_ai_progress(c.days or 30),
+        "canadian": lambda c: collect_canadian(c.days or days),
+        "agri": lambda c: collect_agri(c.days or days),
+        "global": lambda c: collect_global(c.days or days),
     }
 
     log_file = settings.project_root / "logs" / f"run-{date.today().isoformat()}.jsonl"

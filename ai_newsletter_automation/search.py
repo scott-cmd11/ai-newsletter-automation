@@ -274,16 +274,49 @@ def fetch_producthunt_trending(limit: int = 10, days: int = 7) -> List[ArticleHi
 
 
 CURATED_FEEDS = [
-    "https://openai.com/blog/rss",
-    "https://www.anthropic.com/news/rss",
-    "https://deepmind.google/discover/rss.xml",
+    "https://blog.openai.com/rss/",
+    "https://feedproxy.feedly.com/5b36e586-cfce-45df-9d64-1cf9fed78e5b",  # Anthropic
+    "https://deepmind.com/blog/feed/basic/",
+    "http://research.microsoft.com/rss/news.xml",
+    "http://www.technologyreview.com/rss/rss.aspx",
     "https://ai.facebook.com/blog/rss",
     "https://ai.googleblog.com/atom.xml",
-    "https://www.microsoft.com/en-us/research/feed/",
     "https://www.oecd.ai/feed",
-    "https://www.govtech.com/rss",
     "https://hai.stanford.edu/rss.xml",
 ]
+
+
+# ── Google Alert RSS feeds (from Feedly subscriptions) ──
+
+GOOGLE_ALERT_FEEDS: Dict[str, List[str]] = {
+    "trending": [
+        "https://www.google.com/alerts/feeds/03030665084568507357/6619274340374812968",       # AGI
+        "https://www.google.com/alerts/feeds/03030665084568507357/5237285988387868375",       # ASI
+        "https://www.google.com/alerts/feeds/03030665084568507357/11653796448320099668",      # Job Replacement - AI
+    ],
+    "canadian": [
+        "https://www.google.com/alerts/feeds/03030665084568507357/8343122122122789666",       # Canada - AI
+        "https://www.google.com/alerts/feeds/03030665084568507357/5306089899663451631",       # Public Sector - AI
+    ],
+    "global": [
+        "https://www.google.com/alerts/feeds/03030665084568507357/2891758781116511337",       # Ethics - AI
+        "https://www.google.com/alerts/feeds/03030665084568507357/2278791836030122678",       # Governance - AI
+        "https://www.google.com/alerts/feeds/03030665084568507357/16866512384761599386",      # Privacy - AI
+        "https://www.google.com/alerts/feeds/03030665084568507357/7622957089141856354",       # Regulation - AI
+        "https://www.google.com/alerts/feeds/03030665084568507357/15942459126004772098",      # Security - AI
+    ],
+    "agri": [
+        "https://www.google.com/alerts/feeds/03030665084568507357/15755737833312608799",      # Agriculture - AI
+        "https://www.google.com/alerts/feeds/03030665084568507357/3281559451078185126",       # Crops - AI
+        "https://www.google.com/alerts/feeds/03030665084568507357/5761797510369087166",       # Grain - AI
+        "https://www.google.com/alerts/feeds/03030665084568507357/9368672943932362999",       # Grain Industry - AI
+        "https://www.google.com/alerts/feeds/03030665084568507357/12957642636281638741",      # Oil seeds - AI
+        "https://www.google.com/alerts/feeds/03030665084568507357/12957642636281637464",      # Wheat - AI
+        "https://www.google.com/alerts/feeds/03030665084568507357/14624198102712688249",      # Canadian Grain Commission
+        "https://www.google.com/alerts/feeds/03030665084568507357/13610686801601706073",      # Canadian Grain Industry
+        "https://www.google.com/alerts/feeds/03030665084568507357/17711904352499016105",      # Grain Discovery/Inarix
+    ],
+}
 
 
 def fetch_curated_feeds(limit: int = 10, days: int = 7) -> List[ArticleHit]:
@@ -321,8 +354,46 @@ def fetch_curated_feeds(limit: int = 10, days: int = 7) -> List[ArticleHit]:
     return hits
 
 
+def fetch_google_alerts(section_key: str, limit: int = 15, days: int = 7) -> List[ArticleHit]:
+    """Fetch articles from Google Alert RSS feeds mapped to a newsletter section."""
+    urls = GOOGLE_ALERT_FEEDS.get(section_key, [])
+    if not urls:
+        return []
+    hits: List[ArticleHit] = []
+    cutoff = datetime.utcnow() - timedelta(days=days)
+    for url in urls:
+        try:
+            feed = feedparser.parse(url)
+        except Exception:
+            continue
+        for entry in feed.entries:
+            published = entry.get("published_parsed") or entry.get("updated_parsed")
+            if published:
+                pub_dt = datetime(*published[:6])
+                if pub_dt < cutoff:
+                    continue
+            else:
+                continue
+            link = entry.get("link", "")
+            if _is_blocked_url(link):
+                continue
+            hits.append(
+                ArticleHit(
+                    title=entry.get("title", ""),
+                    url=link,
+                    snippet=entry.get("summary", "")[:500],
+                    published=entry.get("published"),
+                    source="Google Alert",
+                )
+            )
+            if len(hits) >= limit:
+                return _dedupe(hits)
+    return _dedupe(hits)
+
+
 def collect_trending(days: int) -> List[ArticleHit]:
     hits: List[ArticleHit] = []
+    hits.extend(fetch_google_alerts("trending", limit=10, days=days))
     hits.extend(fetch_hn_trending(limit=20, days=days))
     hits.extend(fetch_producthunt_trending(limit=10, days=days))
     hits.extend(fetch_curated_feeds(limit=15, days=days))
@@ -437,6 +508,39 @@ def _fetch_pwc_trending(limit: int = 10) -> List[ArticleHit]:
 def collect_ai_progress(days: int) -> List[ArticleHit]:
     hits: List[ArticleHit] = []
     hits.extend(_fetch_pwc_trending(limit=15))
+    return _dedupe(hits)
+
+
+# ── Canadian News (Google Alerts + Tavily) ──
+
+
+def collect_canadian(days: int) -> List[ArticleHit]:
+    """Prioritise Google Alert RSS for Canadian AI news, Tavily as fallback."""
+    hits: List[ArticleHit] = []
+    hits.extend(fetch_google_alerts("canadian", limit=10, days=days))
+    hits.extend(search_stream(DEFAULT_STREAMS["canadian"], days))
+    return _dedupe(hits)
+
+
+# ── Agriculture / Grain-Tech (Google Alerts + Tavily) ──
+
+
+def collect_agri(days: int) -> List[ArticleHit]:
+    """Prioritise Google Alert RSS for agri-tech news, Tavily as fallback."""
+    hits: List[ArticleHit] = []
+    hits.extend(fetch_google_alerts("agri", limit=15, days=days))
+    hits.extend(search_stream(DEFAULT_STREAMS["agri"], days))
+    return _dedupe(hits)
+
+
+# ── Global News (Google Alerts + Tavily) ──
+
+
+def collect_global(days: int) -> List[ArticleHit]:
+    """Prioritise Google Alert RSS for global AI policy news, Tavily as fallback."""
+    hits: List[ArticleHit] = []
+    hits.extend(fetch_google_alerts("global", limit=10, days=days))
+    hits.extend(search_stream(DEFAULT_STREAMS["global"], days))
     return _dedupe(hits)
 
 
