@@ -1,4 +1,5 @@
 import json
+import os
 from collections import OrderedDict
 from datetime import date
 from pathlib import Path
@@ -37,9 +38,20 @@ SECTION_ORDER = [
 
 
 def _log_skipped(reason: str, url: str, log: Path) -> None:
-    log.parent.mkdir(parents=True, exist_ok=True)
-    with log.open("a", encoding="utf-8") as f:
-        f.write(json.dumps({"reason": reason, "url": url}) + "\n")
+    """Best-effort logging — silently skip on read-only filesystems (Vercel)."""
+    try:
+        log.parent.mkdir(parents=True, exist_ok=True)
+        with log.open("a", encoding="utf-8") as f:
+            f.write(json.dumps({"reason": reason, "url": url}) + "\n")
+    except OSError:
+        # Vercel serverless: filesystem is read-only, try /tmp
+        try:
+            tmp_log = Path("/tmp") / "logs" / log.name
+            tmp_log.parent.mkdir(parents=True, exist_ok=True)
+            with tmp_log.open("a", encoding="utf-8") as f:
+                f.write(json.dumps({"reason": reason, "url": url}) + "\n")
+        except OSError:
+            pass  # Give up silently — logging is non-critical
 
 
 def process_hits(hits: List[ArticleHit], limit: int, log_file: Path) -> List[VerifiedArticle]:
