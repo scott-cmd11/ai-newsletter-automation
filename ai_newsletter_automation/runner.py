@@ -16,12 +16,14 @@ from .search import (
     get_streams,
     search_stream,
     collect_trending,
+    collect_events,
     collect_events_public,
     collect_research,
     collect_ai_progress,
     collect_canadian,
     collect_agri,
     collect_global,
+    collect_deep_dive,
 )
 from .summarize import summarize_section
 from .verify import verify_link
@@ -67,12 +69,30 @@ def process_hits(hits: List[ArticleHit], limit: int, log_file: Path) -> List[Ver
             continue
         html = verify_link(hit.url)
         if html is None:
-            _log_skipped("verify_failed", hit.url, log_file)
+            # Link unreachable — but if we have a good RSS snippet, use it
+            if hit.snippet and len(hit.snippet) > 80:
+                _log_skipped("verify_failed_using_snippet", hit.url, log_file)
+                verified.append(
+                    VerifiedArticle(
+                        title=hit.title,
+                        url=hit.url,
+                        snippet=hit.snippet,
+                        content=hit.snippet,
+                        published=hit.published,
+                    )
+                )
+            else:
+                _log_skipped("verify_failed", hit.url, log_file)
             continue
         content = scrape(hit.url, html=html)
         if not content:
-            _log_skipped("scrape_failed", hit.url, log_file)
-            continue
+            # Scrape failed — fall back to RSS snippet
+            if hit.snippet and len(hit.snippet) > 40:
+                _log_skipped("scrape_failed_using_snippet", hit.url, log_file)
+                content = hit.snippet
+            else:
+                _log_skipped("scrape_failed", hit.url, log_file)
+                continue
         verified.append(
             VerifiedArticle(
                 title=hit.title,
@@ -101,12 +121,14 @@ def process_section(key: str, days: int, max_per_stream: Optional[int] = None) -
 
     collectors: Dict[str, Callable[[SectionConfig], List[ArticleHit]]] = {
         "trending": lambda c: collect_trending(days),
+        "events": lambda c: collect_events(c.days or days),
         "events_public": lambda c: collect_events_public(c.days or 30),
         "research_plain": lambda c: collect_research(c.days or days),
         "ai_progress": lambda c: collect_ai_progress(c.days or 30),
         "canadian": lambda c: collect_canadian(c.days or days),
         "agri": lambda c: collect_agri(c.days or days),
         "global": lambda c: collect_global(c.days or days),
+        "deep_dive": lambda c: collect_deep_dive(c.days or days),
     }
 
     log_file = settings.project_root / "logs" / f"run-{date.today().isoformat()}.jsonl"
@@ -117,31 +139,13 @@ def process_section(key: str, days: int, max_per_stream: Optional[int] = None) -
         search_days = cfg.days or days
         hits = search_stream(cfg, search_days)
 
+    _log_skipped(f"section_{key}_total_hits={len(hits)}", "", log_file)
+
     verified = process_hits(hits, cfg.limit, log_file)
     items = summarize_section(cfg.name, verified, require_date=cfg.require_date, section_key=key)
 
-    # Post-verify: confirm each Live_Link is still reachable
-    alive_items: List[SummaryItem] = []
-    for item in items:
-        if not item.Live_Link:
-            continue
-        try:
-            resp = requests.head(item.Live_Link, timeout=5, allow_redirects=True,
-                                 headers={"User-Agent": "Mozilla/5.0 (compatible; AI-Newsletter/1.0)"})
-            if resp.status_code < 400:
-                alive_items.append(item)
-        except Exception:
-            # If HEAD fails, try GET as a fallback (some servers block HEAD)
-            try:
-                resp = requests.get(item.Live_Link, timeout=5, allow_redirects=True, stream=True,
-                                    headers={"User-Agent": "Mozilla/5.0 (compatible; AI-Newsletter/1.0)"})
-                resp.close()
-                if resp.status_code < 400:
-                    alive_items.append(item)
-            except Exception:
-                continue
-
-    return alive_items
+    # Links were already verified in process_hits — no redundant post-verify
+    return [item for item in items if item.Live_Link]
 
 
 @click.command()

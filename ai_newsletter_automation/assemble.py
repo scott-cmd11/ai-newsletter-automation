@@ -5,9 +5,13 @@ from typing import Dict, List
 from jinja2 import Environment, FileSystemLoader, select_autoescape
 
 from .models import SummaryItem
+from .search import DEFAULT_STREAMS
 
 
 PROJECT_ROOT = Path(__file__).resolve().parent.parent
+
+# Build display-name lookup from the canonical SectionConfig definitions
+SECTION_LABELS: Dict[str, str] = {key: cfg.name for key, cfg in DEFAULT_STREAMS.items()}
 
 
 def _get_env() -> Environment:
@@ -31,4 +35,5 @@ def render_newsletter(sections: Dict[str, List[SummaryItem]], run_date: str | No
     return template.render(
         run_date=run_date or date.today().isoformat(),
         sections=sections,
+        section_labels=SECTION_LABELS,
     )

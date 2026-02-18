@@ -147,15 +147,14 @@ def _parse_date_str(date_str: Optional[str]) -> Optional[datetime]:
 
 def _filter_by_date(hits: List[ArticleHit], days: int) -> List[ArticleHit]:
     """Remove hits whose published date is outside the search window.
-    Hits with no parseable date are REJECTED to prevent stale content."""
+    Hits with no parseable date are ALLOWED through — RSS sources are
+    trusted and rejecting dateless articles caused too much attrition."""
     cutoff = datetime.utcnow() - timedelta(days=days)
     filtered = []
     for h in hits:
         pub = _parse_date_str(h.published)
-        if pub is None:
-            # No date — reject to avoid stale/evergreen content
-            continue
-        if pub < cutoff:
+        if pub is not None and pub < cutoff:
+            # Has a date and it's too old — skip
             continue
         filtered.append(h)
     return filtered
@@ -578,6 +577,26 @@ def collect_global(days: int) -> List[ArticleHit]:
     hits: List[ArticleHit] = []
     hits.extend(fetch_google_alerts("global", limit=10, days=days))
     hits.extend(search_stream(DEFAULT_STREAMS["global"], days))
+    return _dedupe(hits)
+
+
+# ── Events (general AI conferences / webinars) ──
+
+
+def collect_events(days: int) -> List[ArticleHit]:
+    """Search for upcoming AI events, conferences, and webinars."""
+    hits: List[ArticleHit] = []
+    hits.extend(search_stream(DEFAULT_STREAMS["events"], days))
+    return _dedupe(hits)
+
+
+# ── Deep Dive (long-form reports from major orgs) ──
+
+
+def collect_deep_dive(days: int) -> List[ArticleHit]:
+    """Search for in-depth AI reports from OECD, Anthropic, MIT, METR, etc."""
+    hits: List[ArticleHit] = []
+    hits.extend(search_stream(DEFAULT_STREAMS["deep_dive"], days))
     return _dedupe(hits)
 
 

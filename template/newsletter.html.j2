@@ -22,8 +22,9 @@
     <div><strong>Date:</strong> {{ run_date }}</div>
 
     {% for section_key, items in sections.items() %}
+    {% if items %}
     <div class="section">
-        <h2>{{ section_key|replace("_"," ")|title }}</h2>
+        <h2>{{ section_labels.get(section_key, section_key|replace("_"," ")|title) }}</h2>
         <table>
             {% for item in items %}
             <tr>
@@ -39,6 +40,7 @@
             {% endfor %}
         </table>
     </div>
+    {% endif %}
     {% endfor %}
 
     <div class="footer">
