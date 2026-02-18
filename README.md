@@ -26,7 +26,7 @@ An open-source, automated pipeline that generates a weekly AI briefing for Canad
 
 ```bash
 # Clone and setup
-git clone https://github.com/scottgriffinm/ai-newsletter-automation.git
+git clone https://github.com/scott-cmd11/ai-newsletter-automation.git
 cd ai-newsletter-automation
 python -m venv .venv
 .venv\Scripts\activate        # Windows
