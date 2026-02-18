@@ -1,18 +1,14 @@
 {
     "functions": {
         "api/*.py": {
-            "runtime": "@vercel/python",
             "maxDuration": 60
         }
     },
-    "routes": [
+    "rewrites": [
         {
-            "src": "/api/(.*)",
-            "dest": "/api/$1"
-        },
-        {
-            "src": "/(.*)",
-            "dest": "/public/$1"
+            "source": "/(.*)",
+            "destination": "/public/$1"
         }
-    ]
+    ],
+    "outputDirectory": "."
 }
