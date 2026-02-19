@@ -18,6 +18,7 @@ class handler(BaseHTTPRequestHandler):
 
         key = params.get("key", [None])[0]
         days = int(params.get("days", ["7"])[0])
+        lang = params.get("lang", ["en"])[0]
 
         if not key:
             self.send_response(400)
@@ -42,7 +43,7 @@ class handler(BaseHTTPRequestHandler):
             return
 
         try:
-            items = process_section(key, days)
+            items = process_section(key, days, lang=lang)
             result = {
                 "section_key": key,
                 "items": [

@@ -37,7 +37,8 @@ class handler(BaseHTTPRequestHandler):
             for it in items_raw
         ]
 
-        tldr = generate_tldr(items)
+        lang = data.get("lang", "en")
+        tldr = generate_tldr(items, lang=lang)
 
         self.send_response(200)
         self.send_header("Content-Type", "application/json")

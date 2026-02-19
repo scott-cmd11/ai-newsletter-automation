@@ -41,7 +41,8 @@ class handler(BaseHTTPRequestHandler):
 
         run_date = data.get("run_date", date.today().isoformat())
         tldr = data.get("tldr", [])
-        html = render_newsletter(sections, run_date=run_date, tldr=tldr)
+        lang = data.get("lang", "en")
+        html = render_newsletter(sections, run_date=run_date, tldr=tldr, lang=lang)
 
         self.send_response(200)
         self.send_header("Content-Type", "text/html; charset=utf-8")

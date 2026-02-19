@@ -105,7 +105,7 @@ def process_hits(hits: List[ArticleHit], limit: int, log_file: Path) -> List[Ver
     return verified
 
 
-def process_section(key: str, days: int, max_per_stream: Optional[int] = None) -> List[SummaryItem]:
+def process_section(key: str, days: int, max_per_stream: Optional[int] = None, lang: str = "en") -> List[SummaryItem]:
     """Generate summaries for a single newsletter section.
 
     This is the core function used by both the CLI and the Vercel API.
@@ -142,7 +142,7 @@ def process_section(key: str, days: int, max_per_stream: Optional[int] = None) -
     _log_skipped(f"section_{key}_total_hits={len(hits)}", "", log_file)
 
     verified = process_hits(hits, cfg.limit, log_file)
-    items = summarize_section(cfg.name, verified, require_date=cfg.require_date, section_key=key)
+    items = summarize_section(cfg.name, verified, require_date=cfg.require_date, section_key=key, lang=lang)
 
     # Strip out items with stale dates (the LLM may output old dates)
     items = _filter_items_by_date(items, days)
@@ -184,28 +184,30 @@ def _filter_items_by_date(items: List[SummaryItem], days: int) -> List[SummaryIt
 @click.option("--date", "run_date", default=None, help="Override date string YYYY-MM-DD.")
 @click.option("--max-per-stream", default=None, type=int, help="Override max items per stream.")
 @click.option("--dry-run", is_flag=True, default=False, help="Write HTML only, skip Outlook.")
-def main(since_days, run_date, max_per_stream, dry_run):
+@click.option("--lang", default="en", type=click.Choice(["en", "fr"]), help="Output language.")
+def main(since_days, run_date, max_per_stream, dry_run, lang):
     settings = get_settings()
     days = since_days or settings.run_days
 
     sections: Dict[str, List[SummaryItem]] = OrderedDict()
     for key in SECTION_ORDER:
         click.echo(f"  ▸ {key}...")
-        sections[key] = process_section(key, days, max_per_stream)
+        sections[key] = process_section(key, days, max_per_stream, lang=lang)
 
     # Generate TL;DR from the top-relevance items across all sections
     click.echo("  ▸ generating TL;DR...")
     all_items = [item for items in sections.values() for item in items]
     all_items.sort(key=lambda x: x.Relevance or 0, reverse=True)
-    tldr = generate_tldr(all_items[:6])
+    tldr = generate_tldr(all_items[:6], lang=lang)
 
-    html = render_newsletter(sections, run_date=run_date or date.today().isoformat(), tldr=tldr)
+    html = render_newsletter(sections, run_date=run_date or date.today().isoformat(), tldr=tldr, lang=lang)
 
-    output_path = settings.project_root / "output" / "newsletter.html"
+    suffix = f"-{lang}" if lang != "en" else ""
+    output_path = settings.project_root / "output" / f"newsletter{suffix}.html"
     output_path.parent.mkdir(parents=True, exist_ok=True)
     output_path.write_text(html, encoding="utf-8")
 
-    click.echo(f"Generated newsletter → {output_path}")
+    click.echo(f"Generated newsletter ({lang}) → {output_path}")
 
 
 if __name__ == "__main__":

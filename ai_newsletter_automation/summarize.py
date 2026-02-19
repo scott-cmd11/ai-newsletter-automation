@@ -120,12 +120,25 @@ _FALLBACK_MODELS = [
 ]
 
 
+# ── French language modifier ──
+
+_FRENCH_PROMPT_MODIFIER = """
+
+LANGUAGE REQUIREMENT — FRENCH:
+- Write ALL "Headline" and "Summary_Text" values in fluent, professional Canadian French.
+- Use proper Canadian French terminology (e.g., "fonction publique" not "service public",
+  "gouvernement fédéral" not "gouvernement central").
+- Keep "Source", "Live_Link", and "Date" fields in their original format (do not translate).
+- Maintain the same quality, tone, and brevity standards as the English version."""
+
+
 def summarize_section(
     section_name: str,
     articles: List[VerifiedArticle],
     require_date: bool = False,
     model: str = "llama-3.3-70b-versatile",
     section_key: str = "",
+    lang: str = "en",
 ) -> List[SummaryItem]:
     if not articles:
         return []
@@ -188,6 +201,10 @@ def summarize_section(
         )
     system_prompt = SYSTEM_PROMPT_BASE + extra_rules
 
+    # Add French language modifier if needed
+    if lang == "fr":
+        system_prompt += _FRENCH_PROMPT_MODIFIER
+
     user_prompt = f"Section: {section_name}\nToday's date: {time.strftime('%Y-%m-%d')}\nSummarize the following verified articles:\n{_build_prompt(articles)}"
 
     url = "https://api.groq.com/openai/v1/chat/completions"
@@ -246,10 +263,13 @@ Rules:
 - Cover the 3 most important stories from the items provided.
 - Write for a Deputy Minister scanning on their phone."""
 
+_TLDR_FRENCH_MODIFIER = "\n- Write ALL bullets in fluent, professional Canadian French."
+
 
 def generate_tldr(
     top_items: List[SummaryItem],
     model: str = "llama-3.3-70b-versatile",
+    lang: str = "en",
 ) -> List[str]:
     """Generate 3-bullet TL;DR from the highest-relevance newsletter items."""
     if not top_items:
@@ -260,6 +280,10 @@ def generate_tldr(
         f"- {it.Headline}: {it.Summary_Text}" for it in top_items[:6]
     )
     user_prompt = f"Pick the 3 most important and produce 3 bullets:\n{items_text}"
+
+    sys_prompt = TLDR_SYSTEM_PROMPT
+    if lang == "fr":
+        sys_prompt += _TLDR_FRENCH_MODIFIER
 
     url = "https://api.groq.com/openai/v1/chat/completions"
     headers = {
@@ -275,7 +299,7 @@ def generate_tldr(
                 "temperature": 0.2,
                 "max_tokens": 400,
                 "messages": [
-                    {"role": "system", "content": TLDR_SYSTEM_PROMPT},
+                    {"role": "system", "content": sys_prompt},
                     {"role": "user", "content": user_prompt},
                 ],
             },

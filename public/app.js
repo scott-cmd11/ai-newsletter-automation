@@ -108,6 +108,7 @@ function updateProgress(completed, currentLabel) {
 
 async function generateNewsletter() {
     const days = parseInt($("days-input").value) || 7;
+    const lang = $("lang-select").value || "en";
     const generateBtn = $("generate-btn");
     const downloadBtn = $("download-btn");
 
@@ -127,7 +128,7 @@ async function generateNewsletter() {
         updateProgress(completed, section.label);
 
         try {
-            const resp = await fetch(`/api/generate_section?key=${section.key}&days=${days}`);
+            const resp = await fetch(`/api/generate_section?key=${section.key}&days=${days}&lang=${lang}`);
             if (!resp.ok) {
                 const err = await resp.json().catch(() => ({ error: resp.statusText }));
                 throw new Error(err.error || `HTTP ${resp.status}`);
@@ -175,7 +176,7 @@ async function generateNewsletter() {
                 const tldrResp = await fetch("/api/tldr", {
                     method: "POST",
                     headers: { "Content-Type": "application/json" },
-                    body: JSON.stringify({ items: topItems }),
+                    body: JSON.stringify({ items: topItems, lang: lang }),
                 });
                 if (tldrResp.ok) {
                     const tldrData = await tldrResp.json();
@@ -189,7 +190,7 @@ async function generateNewsletter() {
         const renderResp = await fetch("/api/render", {
             method: "POST",
             headers: { "Content-Type": "application/json" },
-            body: JSON.stringify({ sections: allSections, run_date: today, tldr: tldr }),
+            body: JSON.stringify({ sections: allSections, run_date: today, tldr: tldr, lang: lang }),
         });
 
         if (!renderResp.ok) {
