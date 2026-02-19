@@ -40,5 +40,5 @@ def get_settings() -> Settings:
             "AI This Week | Key AI Developments You Should Know",
         ),
         run_days=int(os.getenv("RUN_DAYS", "7")),
-        max_per_stream=int(os.getenv("MAX_PER_STREAM", "0")) or None,
+        max_per_stream=int(os.getenv("MAX_PER_STREAM") or "0") or None,
     )

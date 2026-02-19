@@ -55,8 +55,8 @@ def _parse_json(raw: str) -> List[SummaryItem]:
     return items
 
 
-_MAX_RETRIES = 3
-_RETRY_BASE_WAIT = 2  # seconds
+_MAX_RETRIES = 5
+_RETRY_BASE_WAIT = 5  # seconds — Groq free-tier rate-limits aggressively
 
 
 def _groq_request(url: str, headers: dict, payload: dict) -> dict:
@@ -64,7 +64,15 @@ def _groq_request(url: str, headers: dict, payload: dict) -> dict:
     for attempt in range(_MAX_RETRIES):
         resp = requests.post(url, headers=headers, json=payload, timeout=30)
         if resp.status_code == 429 or resp.status_code >= 500:
-            wait = _RETRY_BASE_WAIT * (2 ** attempt)
+            # Respect Retry-After header if Groq provides one
+            retry_after = resp.headers.get("Retry-After")
+            if retry_after:
+                try:
+                    wait = max(float(retry_after), 1.0)
+                except (ValueError, TypeError):
+                    wait = _RETRY_BASE_WAIT * (2 ** attempt)
+            else:
+                wait = _RETRY_BASE_WAIT * (2 ** attempt)
             time.sleep(wait)
             continue
         resp.raise_for_status()
@@ -73,6 +81,12 @@ def _groq_request(url: str, headers: dict, payload: dict) -> dict:
     resp = requests.post(url, headers=headers, json=payload, timeout=30)
     resp.raise_for_status()
     return resp.json()
+
+
+_FALLBACK_MODELS = [
+    "llama-3.3-70b-versatile",
+    "llama-3.1-8b-instant",       # much higher rate limit on Groq free tier
+]
 
 
 def summarize_section(
@@ -101,38 +115,45 @@ def summarize_section(
 
     user_prompt = f"Section: {section_name}\nToday's date: {time.strftime('%Y-%m-%d')}\nSummarize the following verified articles:\n{_build_prompt(articles)}"
 
-    messages = [
-        {"role": "system", "content": system_prompt},
-        {"role": "user", "content": user_prompt},
-    ]
-
     url = "https://api.groq.com/openai/v1/chat/completions"
     headers = {
         "Authorization": f"Bearer {settings.groq_api_key}",
         "Content-Type": "application/json",
     }
 
-    for attempt in range(2):
-        data = _groq_request(
-            url,
-            headers,
-            {
-                "model": model,
-                "temperature": 0.2,
-                "max_tokens": 1500,
-                "messages": messages,
-            },
-        )
-        raw = data["choices"][0]["message"]["content"].strip()
+    # Try each model in order — fall back to smaller/faster models on rate limits
+    models_to_try = [model] + [m for m in _FALLBACK_MODELS if m != model]
+
+    for current_model in models_to_try:
+        messages = [
+            {"role": "system", "content": system_prompt},
+            {"role": "user", "content": user_prompt},
+        ]
         try:
-            return _parse_json(raw)
-        except Exception:
-            messages.append(
-                {
-                    "role": "system",
-                    "content": "Your previous output was not valid JSON. Respond with JSON only, no prose.",
-                }
-            )
+            for attempt in range(2):
+                data = _groq_request(
+                    url,
+                    headers,
+                    {
+                        "model": current_model,
+                        "temperature": 0.2,
+                        "max_tokens": 1500,
+                        "messages": messages,
+                    },
+                )
+                raw = data["choices"][0]["message"]["content"].strip()
+                try:
+                    return _parse_json(raw)
+                except Exception:
+                    messages.append(
+                        {
+                            "role": "system",
+                            "content": "Your previous output was not valid JSON. Respond with JSON only, no prose.",
+                        }
+                    )
+                    continue
+        except requests.exceptions.HTTPError:
+            # Rate-limited even after retries — try next model
             continue
 
     return []

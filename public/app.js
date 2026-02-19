@@ -99,7 +99,14 @@ async function generateNewsletter() {
 
             const data = await resp.json();
             allSections[section.key] = data.items || [];
-            setChipState(section.key, "done");
+
+            if (data.warning || (data.items && data.items.length === 0)) {
+                // Section returned but had issues (rate limit, no content)
+                setChipState(section.key, "done");
+                if (data.warning) console.warn(`Section ${section.key} warning:`, data.warning);
+            } else {
+                setChipState(section.key, "done");
+            }
         } catch (err) {
             console.error(`Section ${section.key} failed:`, err);
             setChipState(section.key, "error");

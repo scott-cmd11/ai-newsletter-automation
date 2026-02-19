@@ -62,8 +62,14 @@ class handler(BaseHTTPRequestHandler):
             self.wfile.write(json.dumps(result).encode())
 
         except Exception as exc:
-            self.send_response(500)
+            # Return partial success (empty items) instead of hard-failing.
+            # This prevents rate-limit cascades from marking every section red.
+            self.send_response(200)
             self.send_header("Content-Type", "application/json")
             self.send_header("Access-Control-Allow-Origin", "*")
             self.end_headers()
-            self.wfile.write(json.dumps({"error": str(exc)}).encode())
+            self.wfile.write(json.dumps({
+                "section_key": key,
+                "items": [],
+                "warning": str(exc),
+            }).encode())
