@@ -1,6 +1,7 @@
 from datetime import date
 from pathlib import Path
 from typing import Dict, List, Optional
+from urllib.parse import urlencode, urlparse, urlunparse, parse_qs, urljoin
 
 from jinja2 import Environment, FileSystemLoader, select_autoescape
 
@@ -72,6 +73,29 @@ UI_STRINGS = {
 }
 
 
+def _add_utm(url: str, section_key: str, run_date: str) -> str:
+    """Append UTM tracking parameters to a URL for engagement analytics."""
+    if not url:
+        return url
+    try:
+        parsed = urlparse(url)
+        existing_params = parse_qs(parsed.query)
+        utm_params = {
+            "utm_source": "ai_this_week",
+            "utm_medium": "email",
+            "utm_campaign": run_date,
+            "utm_content": section_key,
+        }
+        # Don't overwrite existing UTM params
+        for k, v in utm_params.items():
+            if k not in existing_params:
+                existing_params[k] = [v]
+        new_query = urlencode(existing_params, doseq=True)
+        return urlunparse(parsed._replace(query=new_query))
+    except Exception:
+        return url  # on any parsing error, return original
+
+
 def _get_env() -> Environment:
     loader = FileSystemLoader(str(PROJECT_ROOT / "template"))
     env = Environment(loader=loader, autoescape=select_autoescape(["html", "xml"]))
@@ -87,6 +111,8 @@ def render_newsletter(
     env = _get_env()
     template = env.get_template("newsletter.html.j2")
 
+    effective_date = run_date or date.today().isoformat()
+
     # Sort events by date when available
     if "events" in sections:
         events = sections["events"]
@@ -95,13 +121,19 @@ def render_newsletter(
             key=lambda x: x.Date or "",
         )
 
+    # Apply UTM tracking to all Live_Link URLs
+    for section_key, items in sections.items():
+        for item in items:
+            if item.Live_Link:
+                item.Live_Link = _add_utm(item.Live_Link, section_key, effective_date)
+
     # Select language-specific resources
     labels = SECTION_LABELS_FR if lang == "fr" else SECTION_LABELS
     descriptions = SECTION_DESCRIPTIONS_FR if lang == "fr" else SECTION_DESCRIPTIONS
     strings = UI_STRINGS.get(lang, UI_STRINGS["en"])
 
     return template.render(
-        run_date=run_date or date.today().isoformat(),
+        run_date=effective_date,
         sections=sections,
         section_labels=labels,
         section_descriptions=descriptions,
@@ -109,4 +141,5 @@ def render_newsletter(
         lang=lang,
         ui=strings,
     )
+
 

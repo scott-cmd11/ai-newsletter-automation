@@ -440,6 +440,163 @@ body {
     text-decoration: underline;
 }
 
+/* ── Tuning Panel ───────────────────────── */
+
+.tuning-panel {
+    margin-top: 12px;
+    background: #fff;
+    border: 1px solid var(--slate-200);
+    border-radius: var(--radius);
+    box-shadow: var(--shadow-sm);
+    overflow: hidden;
+}
+
+.tuning-toggle {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    width: 100%;
+    padding: 14px 20px;
+    border: none;
+    background: transparent;
+    cursor: pointer;
+    font-family: inherit;
+    font-size: 14px;
+    font-weight: 600;
+    color: var(--slate-600);
+    transition: all var(--transition);
+}
+
+.tuning-toggle:hover {
+    background: var(--slate-50);
+    color: var(--slate-800);
+}
+
+.tuning-toggle-left {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+}
+
+.tuning-chevron {
+    transition: transform var(--transition);
+}
+
+.tuning-content {
+    border-top: 1px solid var(--slate-200);
+    animation: fadeIn 200ms ease;
+}
+
+.tuning-header {
+    padding: 16px 20px 12px;
+    border-bottom: 1px solid var(--slate-100);
+}
+
+.tuning-grid {
+    padding: 12px 20px 16px;
+}
+
+.tuning-row {
+    display: grid;
+    grid-template-columns: 180px 1fr 80px 80px;
+    align-items: center;
+    gap: 12px;
+    padding: 8px 0;
+    border-bottom: 1px solid var(--slate-100);
+}
+
+.tuning-row:last-child {
+    border-bottom: none;
+}
+
+.tuning-label {
+    font-size: 13px;
+    font-weight: 600;
+    color: var(--slate-700);
+}
+
+.tuning-control {
+    display: flex;
+    flex-direction: column;
+    gap: 2px;
+}
+
+.tuning-mini-label {
+    font-size: 10px;
+    font-weight: 600;
+    color: var(--slate-400);
+    text-transform: uppercase;
+    letter-spacing: 0.5px;
+}
+
+.tuning-slider {
+    -webkit-appearance: none;
+    appearance: none;
+    width: 100%;
+    height: 6px;
+    background: linear-gradient(90deg, var(--slate-200), var(--blue-100));
+    border-radius: 3px;
+    outline: none;
+    cursor: pointer;
+}
+
+.tuning-slider::-webkit-slider-thumb {
+    -webkit-appearance: none;
+    appearance: none;
+    width: 18px;
+    height: 18px;
+    border-radius: 50%;
+    background: linear-gradient(135deg, var(--blue-800), var(--blue-600));
+    cursor: pointer;
+    box-shadow: 0 1px 3px rgba(0, 0, 0, 0.2);
+    transition: transform var(--transition);
+}
+
+.tuning-slider::-webkit-slider-thumb:hover {
+    transform: scale(1.15);
+}
+
+.tuning-slider::-moz-range-thumb {
+    width: 18px;
+    height: 18px;
+    border-radius: 50%;
+    background: linear-gradient(135deg, var(--blue-800), var(--blue-600));
+    cursor: pointer;
+    border: none;
+    box-shadow: 0 1px 3px rgba(0, 0, 0, 0.2);
+}
+
+.tuning-value {
+    font-size: 13px;
+    font-weight: 700;
+    color: var(--blue-800);
+    min-width: 20px;
+    text-align: center;
+}
+
+.tuning-input {
+    width: 100%;
+    padding: 6px 8px;
+    border: 1px solid var(--slate-300);
+    border-radius: 6px;
+    font-family: inherit;
+    font-size: 13px;
+    color: var(--slate-800);
+    background: var(--slate-50);
+    outline: none;
+    text-align: center;
+    transition: border-color var(--transition);
+}
+
+.tuning-input:focus {
+    border-color: var(--blue-600);
+    box-shadow: 0 0 0 2px rgba(26, 115, 232, 0.12);
+}
+
+.tuning-input::placeholder {
+    color: var(--slate-400);
+}
+
 /* ── Animations ─────────────────────────── */
 
 @keyframes fadeIn {
@@ -523,5 +680,16 @@ body {
 
     .newsletter-frame {
         height: 60vh;
+    }
+
+    .tuning-row {
+        grid-template-columns: 1fr;
+        gap: 8px;
+    }
+
+    .tuning-label {
+        font-size: 14px;
+        padding-bottom: 4px;
+        border-bottom: 1px solid var(--slate-100);
     }
 }

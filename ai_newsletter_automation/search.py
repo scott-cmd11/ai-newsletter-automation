@@ -248,6 +248,27 @@ def _sort_by_source_priority(hits: List[ArticleHit]) -> List[ArticleHit]:
     )
 
 
+def _apply_time_decay(hits: List[ArticleHit], days: int) -> List[ArticleHit]:
+    """Stable-sort hits so fresher articles rank higher within the search window.
+
+    Computes a freshness score (0.0 = oldest in window, 1.0 = published today).
+    Articles without a parseable date get a neutral 0.5 score.
+    """
+    if not hits or days <= 0:
+        return hits
+
+    now = datetime.utcnow()
+
+    def freshness(h: ArticleHit) -> float:
+        pub = _parse_date_str(h.published)
+        if pub is None:
+            return 0.5  # neutral — don't penalize or reward undated articles
+        age_days = (now - pub).total_seconds() / 86400
+        return max(0.0, 1.0 - (age_days / days))
+
+    return sorted(hits, key=freshness, reverse=True)
+
+
 # ── Tavily search ──
 
 

@@ -27,7 +27,11 @@ from .search import (
     _filter_by_keywords,
     _boost_by_keywords,
     _sort_by_source_priority,
+    _apply_time_decay,
 )
+from .dedup import deduplicate
+from .rerank import rerank_articles
+from .source_quality import SourceTracker
 from .summarize import summarize_section, generate_tldr
 from .verify import verify_link
 
@@ -136,20 +140,33 @@ def process_section(key: str, days: int, max_per_stream: Optional[int] = None, l
 
     log_file = settings.project_root / "logs" / f"run-{date.today().isoformat()}.jsonl"
 
+    search_days = cfg.days or days
+
     if key in collectors:
         hits = collectors[key](cfg)
     else:
-        search_days = cfg.days or days
         hits = search_stream(cfg, search_days)
 
-    # Apply section-level curation: keyword filtering, boosting, source priority
+    # Apply section-level curation pipeline:
+    # 1. Keyword filtering & boosting
     hits = _filter_by_keywords(hits, cfg.reject_keywords)
     hits = _boost_by_keywords(hits, cfg.boost_keywords)
+    # 2. Source priority (curated feeds first)
     hits = _sort_by_source_priority(hits)
+    # 3. Time-decay (fresher articles rank higher within window)
+    hits = _apply_time_decay(hits, search_days)
 
     _log_skipped(f"section_{key}_total_hits={len(hits)}", "", log_file)
 
-    verified = process_hits(hits, cfg.limit, log_file)
+    verified = process_hits(hits, cfg.limit * 2, log_file)  # fetch extra for dedup/rerank
+
+    # 4. Semantic deduplication (remove near-duplicate articles)
+    verified = deduplicate(verified)
+    # 5. LLM-as-Judge reranking (score & filter before summarization)
+    verified = rerank_articles(verified, cfg)
+    # Trim to final limit after reranking
+    verified = verified[:cfg.limit]
+
     items = summarize_section(
         cfg.name, verified,
         require_date=cfg.require_date,
@@ -158,8 +175,13 @@ def process_section(key: str, days: int, max_per_stream: Optional[int] = None, l
         relevance_threshold=cfg.relevance_threshold,
     )
 
+    # 6. Record source quality for future runs
+    tracker = SourceTracker()
+    for item in items:
+        if item.Live_Link and item.Relevance:
+            tracker.record(item.Live_Link, item.Relevance)
+
     # Strip out items with stale dates (the LLM may output old dates)
-    search_days = cfg.days or days
     items = _filter_items_by_date(items, search_days)
 
     # Links were already verified in process_hits — no redundant post-verify

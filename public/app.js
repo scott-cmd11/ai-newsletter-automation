@@ -14,10 +14,58 @@ const SECTIONS = [
     { key: "deep_dive", label: "Deep Dive" },
 ];
 
+/* ── Section Defaults (mirrors DEFAULT_STREAMS in search.py) ── */
+
+const SECTION_DEFAULTS = {
+    trending: { threshold: 7, days: null, limit: 8 },
+    canadian: { threshold: 6, days: null, limit: 5 },
+    global: { threshold: 6, days: null, limit: 5 },
+    events: { threshold: 5, days: null, limit: 4 },
+    events_public: { threshold: 5, days: null, limit: 4 },
+    agri: { threshold: 5, days: null, limit: 3 },
+    ai_progress: { threshold: 6, days: 14, limit: 3 },
+    research_plain: { threshold: 5, days: 14, limit: 3 },
+    deep_dive: { threshold: 7, days: 14, limit: 2 },
+};
+
+/* ── Config Profiles ── */
+
+const PROFILES = {
+    strict: {
+        trending: { threshold: 8, days: null, limit: 5 },
+        canadian: { threshold: 7, days: null, limit: 4 },
+        global: { threshold: 7, days: null, limit: 4 },
+        events: { threshold: 6, days: null, limit: 3 },
+        events_public: { threshold: 6, days: null, limit: 3 },
+        agri: { threshold: 7, days: null, limit: 2 },
+        ai_progress: { threshold: 7, days: 14, limit: 2 },
+        research_plain: { threshold: 7, days: 14, limit: 2 },
+        deep_dive: { threshold: 8, days: 14, limit: 1 },
+    },
+    balanced: { ...structuredClone(SECTION_DEFAULTS) },
+    exploratory: {
+        trending: { threshold: 5, days: null, limit: 12 },
+        canadian: { threshold: 4, days: null, limit: 8 },
+        global: { threshold: 4, days: null, limit: 8 },
+        events: { threshold: 3, days: null, limit: 6 },
+        events_public: { threshold: 3, days: null, limit: 6 },
+        agri: { threshold: 4, days: null, limit: 5 },
+        ai_progress: { threshold: 4, days: 21, limit: 5 },
+        research_plain: { threshold: 4, days: 21, limit: 5 },
+        deep_dive: { threshold: 5, days: 21, limit: 4 },
+    },
+};
+
+// Copy balanced from defaults
+Object.keys(SECTION_DEFAULTS).forEach(k => {
+    PROFILES.balanced[k] = { ...SECTION_DEFAULTS[k] };
+});
+
 let generatedHTML = null;
 let _startTime = null;
 let _timerInterval = null;
 let _sectionTimes = [];   // track how long each section takes
+let _tuningOpen = false;
 
 /* ── Helpers ────────────────────────────── */
 
@@ -40,6 +88,73 @@ function setChipState(key, state) {
     } else if (state === "error") {
         iconEl.innerHTML = '<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></svg>';
     }
+}
+
+/* ── Tuning Panel ──────────────────────── */
+
+function initTuningGrid() {
+    const grid = $("tuning-grid");
+    grid.innerHTML = SECTIONS.map(s => {
+        const d = SECTION_DEFAULTS[s.key] || { threshold: 6, days: null, limit: 5 };
+        return `
+        <div class="tuning-row" data-section="${s.key}">
+            <span class="tuning-label">${s.label}</span>
+            <div class="tuning-control">
+                <label class="tuning-mini-label">Relevance</label>
+                <input type="range" min="1" max="10" value="${d.threshold}"
+                       class="tuning-slider" id="threshold-${s.key}"
+                       oninput="this.nextElementSibling.textContent=this.value">
+                <span class="tuning-value">${d.threshold}</span>
+            </div>
+            <div class="tuning-control">
+                <label class="tuning-mini-label">Days</label>
+                <input type="number" min="1" max="30" value="${d.days || ''}"
+                       placeholder="—" class="tuning-input" id="days-${s.key}">
+            </div>
+            <div class="tuning-control">
+                <label class="tuning-mini-label">Limit</label>
+                <input type="number" min="1" max="20" value="${d.limit}"
+                       class="tuning-input" id="limit-${s.key}">
+            </div>
+        </div>`;
+    }).join("");
+}
+
+function toggleTuning() {
+    _tuningOpen = !_tuningOpen;
+    $("tuning-content").style.display = _tuningOpen ? "" : "none";
+    $("tuning-chevron").style.transform = _tuningOpen ? "rotate(180deg)" : "";
+}
+
+function applyProfile() {
+    const profileKey = $("profile-select").value;
+    const profile = PROFILES[profileKey];
+    if (!profile) return;
+
+    SECTIONS.forEach(s => {
+        const cfg = profile[s.key];
+        if (!cfg) return;
+        const threshEl = $(`threshold-${s.key}`);
+        const daysEl = $(`days-${s.key}`);
+        const limitEl = $(`limit-${s.key}`);
+        if (threshEl) {
+            threshEl.value = cfg.threshold;
+            threshEl.nextElementSibling.textContent = cfg.threshold;
+        }
+        if (daysEl) daysEl.value = cfg.days || "";
+        if (limitEl) limitEl.value = cfg.limit;
+    });
+}
+
+function getTuningOverrides(sectionKey) {
+    const threshold = $(`threshold-${sectionKey}`)?.value;
+    const days = $(`days-${sectionKey}`)?.value;
+    const limit = $(`limit-${sectionKey}`)?.value;
+    return {
+        threshold: threshold ? parseInt(threshold) : null,
+        days: days ? parseInt(days) : null,
+        limit: limit ? parseInt(limit) : null,
+    };
 }
 
 /* ── Progress UI ────────────────────────── */
@@ -107,7 +222,7 @@ function updateProgress(completed, currentLabel) {
 /* ── Generate ───────────────────────────── */
 
 async function generateNewsletter() {
-    const days = parseInt($("days-input").value) || 7;
+    const globalDays = parseInt($("days-input").value) || 7;
     const lang = $("lang-select").value || "en";
     const generateBtn = $("generate-btn");
     const downloadBtn = $("download-btn");
@@ -127,8 +242,14 @@ async function generateNewsletter() {
         setChipState(section.key, "active");
         updateProgress(completed, section.label);
 
+        // Build query params with tuning overrides
+        const overrides = getTuningOverrides(section.key);
+        let url = `/api/generate_section?key=${section.key}&days=${overrides.days || globalDays}&lang=${lang}`;
+        if (overrides.limit) url += `&limit=${overrides.limit}`;
+        if (overrides.threshold) url += `&relevance_threshold=${overrides.threshold}`;
+
         try {
-            const resp = await fetch(`/api/generate_section?key=${section.key}&days=${days}&lang=${lang}`);
+            const resp = await fetch(url);
             if (!resp.ok) {
                 const err = await resp.json().catch(() => ({ error: resp.statusText }));
                 throw new Error(err.error || `HTTP ${resp.status}`);
@@ -234,3 +355,9 @@ function downloadHTML() {
     document.body.removeChild(a);
     URL.revokeObjectURL(url);
 }
+
+/* ── Init ───────────────────────────────── */
+
+document.addEventListener("DOMContentLoaded", () => {
+    initTuningGrid();
+});
