@@ -55,8 +55,9 @@ def _parse_json(raw: str) -> List[SummaryItem]:
     return items
 
 
-_MAX_RETRIES = 5
-_RETRY_BASE_WAIT = 5  # seconds — Groq free-tier rate-limits aggressively
+_MAX_RETRIES = 3
+_RETRY_BASE_WAIT = 3  # seconds — tuned to stay under Vercel 60s timeout
+_MAX_WAIT = 15        # cap single wait to avoid exceeding function timeout
 
 
 def _groq_request(url: str, headers: dict, payload: dict) -> dict:
@@ -68,11 +69,11 @@ def _groq_request(url: str, headers: dict, payload: dict) -> dict:
             retry_after = resp.headers.get("Retry-After")
             if retry_after:
                 try:
-                    wait = max(float(retry_after), 1.0)
+                    wait = min(max(float(retry_after), 1.0), _MAX_WAIT)
                 except (ValueError, TypeError):
-                    wait = _RETRY_BASE_WAIT * (2 ** attempt)
+                    wait = min(_RETRY_BASE_WAIT * (2 ** attempt), _MAX_WAIT)
             else:
-                wait = _RETRY_BASE_WAIT * (2 ** attempt)
+                wait = min(_RETRY_BASE_WAIT * (2 ** attempt), _MAX_WAIT)
             time.sleep(wait)
             continue
         resp.raise_for_status()
