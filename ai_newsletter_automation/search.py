@@ -39,48 +39,71 @@ DEFAULT_STREAMS: Dict[str, SectionConfig] = {
         name="Trending AI",
         query='"artificial intelligence" OR "AI" major announcement OR launch OR release this week',
         limit=8,
+        relevance_threshold=7,
+        boost_keywords=["GPT", "Claude", "Gemini", "open source", "regulation"],
     ),
     "canadian": SectionConfig(
         name="Canadian News",
         query='"Artificial Intelligence" AND (Canada OR "federal government" OR "public service")',
         limit=5,
+        include_domains=["gc.ca", "cbc.ca", "globalnews.ca", "thestar.com"],
+        relevance_threshold=6,
+        boost_keywords=["TBS", "ISED", "Treasury Board", "PSPC", "federal", "provincial"],
     ),
     "global": SectionConfig(
         name="Global News",
         query='"AI" AND (regulation OR governance OR "executive order" OR policy) AND (EU OR US OR UK OR G7 OR OECD OR UN) -Canada',
         limit=5,
+        relevance_threshold=6,
+        boost_keywords=["EU AI Act", "executive order", "OECD", "G7", "regulation"],
+        reject_keywords=["crypto", "blockchain", "NFT"],
     ),
     "events": SectionConfig(
         name="Events",
         query='AI conference OR AI summit OR "artificial intelligence" event OR "machine learning" workshop 2026',
         limit=4,
         require_date=True,
+        relevance_threshold=5,
     ),
     "events_public": SectionConfig(
         name="Public-Servant Events",
         query='"artificial intelligence" AND (training OR webinar OR course) AND ("Government of Canada" OR "public service" OR CSPS)',
         limit=4,
         require_date=True,
+        include_domains=["csps-efpc.gc.ca", "canada.ca"],
+        relevance_threshold=5,
     ),
     "agri": SectionConfig(
         name="Grain / Agri-Tech",
         query='("Machine Learning" OR "AI") AND ("Grain Quality" OR Agriculture OR "precision agriculture" OR "crop prediction")',
         limit=3,
+        relevance_threshold=5,
+        reject_keywords=["crypto", "blockchain", "NFT", "bitcoin"],
+        boost_keywords=["CGC", "canola", "wheat", "grain logistics", "crop prediction"],
     ),
     "ai_progress": SectionConfig(
         name="AI Progress",
         query='"AI model" AND (benchmark OR SOTA OR "state of the art" OR leaderboard) new results',
         limit=3,
+        days=14,
+        relevance_threshold=6,
+        boost_keywords=["benchmark", "SOTA", "leaderboard", "accuracy"],
     ),
     "research_plain": SectionConfig(
         name="Plain-Language Research",
         query='AI research breakthrough OR "large language model" new paper OR "machine learning" novel approach 2026',
         limit=3,
+        days=14,
+        relevance_threshold=5,
+        boost_keywords=["breakthrough", "novel", "state-of-the-art"],
     ),
     "deep_dive": SectionConfig(
         name="Deep Dive",
         query='(OECD OR Anthropic OR MIT OR METR OR NIST OR "World Economic Forum") AND "AI" AND (report OR whitepaper OR framework)',
         limit=2,
+        days=14,
+        relevance_threshold=7,
+        boost_keywords=["report", "whitepaper", "framework", "policy"],
     ),
 }
 
@@ -167,9 +190,62 @@ def _filter_by_date(hits: List[ArticleHit], days: int) -> List[ArticleHit]:
     return filtered
 
 
-def _filter_blocked(hits: List[ArticleHit]) -> List[ArticleHit]:
-    """Remove hits from blocked domains or URL patterns."""
-    return [h for h in hits if not _is_blocked_url(h.url)]
+def _filter_blocked(hits: List[ArticleHit], extra_excludes: Optional[Iterable[str]] = None) -> List[ArticleHit]:
+    """Remove hits from blocked domains or URL patterns.
+    Optionally applies section-level exclude_domains on top of the global blocklist."""
+    filtered = [h for h in hits if not _is_blocked_url(h.url)]
+    if extra_excludes:
+        exclude_set = {d.lower() for d in extra_excludes}
+        filtered = [
+            h for h in filtered
+            if not any((urlparse(h.url).hostname or "").endswith(d) for d in exclude_set)
+        ]
+    return filtered
+
+
+def _filter_by_keywords(hits: List[ArticleHit], reject_keywords: Optional[List[str]]) -> List[ArticleHit]:
+    """Remove hits whose title or snippet contains any reject keyword (case-insensitive)."""
+    if not reject_keywords:
+        return hits
+    reject_lower = [k.lower() for k in reject_keywords]
+    filtered = []
+    for h in hits:
+        text = f"{h.title} {h.snippet}".lower()
+        if any(k in text for k in reject_lower):
+            continue
+        filtered.append(h)
+    return filtered
+
+
+def _boost_by_keywords(hits: List[ArticleHit], boost_keywords: Optional[List[str]]) -> List[ArticleHit]:
+    """Stable-sort hits so articles containing boost keywords appear first."""
+    if not boost_keywords:
+        return hits
+    boost_lower = [k.lower() for k in boost_keywords]
+
+    def score(h: ArticleHit) -> int:
+        text = f"{h.title} {h.snippet}".lower()
+        return sum(1 for k in boost_lower if k in text)
+
+    return sorted(hits, key=score, reverse=True)
+
+
+# Source priority for sorting — lower number = higher priority.
+_SOURCE_PRIORITY = {
+    "Google Alert": 0,
+    "RSS": 1,
+    "arXiv": 1,
+    "PapersWithCode": 1,
+}
+_DEFAULT_SOURCE_PRIORITY = 5  # Tavily and unknown sources
+
+
+def _sort_by_source_priority(hits: List[ArticleHit]) -> List[ArticleHit]:
+    """Stable-sort hits so curated sources (Google Alerts, RSS) rank above web search."""
+    return sorted(
+        hits,
+        key=lambda h: _SOURCE_PRIORITY.get(h.source or "", _DEFAULT_SOURCE_PRIORITY),
+    )
 
 
 # ── Tavily search ──
@@ -184,7 +260,7 @@ def search_stream(section: SectionConfig, days: int) -> List[ArticleHit]:
         "api_key": settings.tavily_api_key,
         "max_results": max_results,
         "search_depth": "advanced",
-        "include_domains": None,
+        "include_domains": section.include_domains,
         "days": days,
     }
 
@@ -204,9 +280,12 @@ def search_stream(section: SectionConfig, days: int) -> List[ArticleHit]:
             )
         )
 
-    # Post-filter: date + blocked domains
-    hits = _filter_blocked(hits)
+    # Post-filter: date + blocked domains (global + section-level excludes)
+    hits = _filter_blocked(hits, extra_excludes=section.exclude_domains)
     hits = _filter_by_date(hits, days)
+    # Apply section-level keyword filtering and boosting
+    hits = _filter_by_keywords(hits, section.reject_keywords)
+    hits = _boost_by_keywords(hits, section.boost_keywords)
     return hits
 
 

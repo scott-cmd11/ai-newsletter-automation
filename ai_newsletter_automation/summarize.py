@@ -56,7 +56,7 @@ def _build_prompt(articles: List[VerifiedArticle]) -> str:
     return "\n\n".join(lines)
 
 
-def _parse_json(raw: str) -> List[SummaryItem]:
+def _parse_json(raw: str, relevance_threshold: int = 6) -> List[SummaryItem]:
     # Handle markdown-wrapped JSON
     cleaned = raw.strip()
     if cleaned.startswith("```"):
@@ -69,8 +69,8 @@ def _parse_json(raw: str) -> List[SummaryItem]:
     items: List[SummaryItem] = []
     for obj in data:
         relevance = int(obj.get("Relevance", 5))
-        # Filter out low-relevance items (6+ = useful)
-        if relevance < 6:
+        # Filter out items below the section's relevance threshold
+        if relevance < relevance_threshold:
             continue
         items.append(
             SummaryItem(
@@ -139,6 +139,7 @@ def summarize_section(
     model: str = "llama-3.3-70b-versatile",
     section_key: str = "",
     lang: str = "en",
+    relevance_threshold: int = 6,
 ) -> List[SummaryItem]:
     if not articles:
         return []
@@ -235,7 +236,7 @@ def summarize_section(
                 )
                 raw = data["choices"][0]["message"]["content"].strip()
                 try:
-                    return _parse_json(raw)
+                    return _parse_json(raw, relevance_threshold=relevance_threshold)
                 except Exception:
                     messages.append(
                         {

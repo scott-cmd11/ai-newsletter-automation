@@ -40,3 +40,9 @@ class SectionConfig:
     description: Optional[str] = None
     fallback: Optional[List[str]] = None
     days: Optional[int] = None  # override default search window for this section
+    # ── Per-section curation knobs ──
+    include_domains: Optional[List[str]] = None   # prefer articles from these domains
+    exclude_domains: Optional[List[str]] = None   # block these domains (section-level)
+    relevance_threshold: int = 6                   # min LLM relevance score (1-10) to keep
+    boost_keywords: Optional[List[str]] = None     # rank articles containing these higher
+    reject_keywords: Optional[List[str]] = None    # drop articles matching these words

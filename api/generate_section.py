@@ -9,6 +9,7 @@ sys.path.insert(0, os.path.join(os.path.dirname(__file__), ".."))
 
 from ai_newsletter_automation.runner import process_section, SECTION_ORDER
 from ai_newsletter_automation.models import SummaryItem
+from ai_newsletter_automation.search import get_streams
 
 
 class handler(BaseHTTPRequestHandler):
@@ -19,6 +20,9 @@ class handler(BaseHTTPRequestHandler):
         key = params.get("key", [None])[0]
         days = int(params.get("days", ["7"])[0])
         lang = params.get("lang", ["en"])[0]
+        # Optional per-request curation overrides
+        limit_override = params.get("limit", [None])[0]
+        relevance_override = params.get("relevance_threshold", [None])[0]
 
         if not key:
             self.send_response(400)
@@ -43,7 +47,9 @@ class handler(BaseHTTPRequestHandler):
             return
 
         try:
-            items = process_section(key, days, lang=lang)
+            # Apply per-request overrides if provided
+            max_per_stream = int(limit_override) if limit_override else None
+            items = process_section(key, days, max_per_stream=max_per_stream, lang=lang)
             result = {
                 "section_key": key,
                 "items": [

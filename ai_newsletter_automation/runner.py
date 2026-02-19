@@ -24,6 +24,9 @@ from .search import (
     collect_agri,
     collect_global,
     collect_deep_dive,
+    _filter_by_keywords,
+    _boost_by_keywords,
+    _sort_by_source_priority,
 )
 from .summarize import summarize_section, generate_tldr
 from .verify import verify_link
@@ -139,13 +142,25 @@ def process_section(key: str, days: int, max_per_stream: Optional[int] = None, l
         search_days = cfg.days or days
         hits = search_stream(cfg, search_days)
 
+    # Apply section-level curation: keyword filtering, boosting, source priority
+    hits = _filter_by_keywords(hits, cfg.reject_keywords)
+    hits = _boost_by_keywords(hits, cfg.boost_keywords)
+    hits = _sort_by_source_priority(hits)
+
     _log_skipped(f"section_{key}_total_hits={len(hits)}", "", log_file)
 
     verified = process_hits(hits, cfg.limit, log_file)
-    items = summarize_section(cfg.name, verified, require_date=cfg.require_date, section_key=key, lang=lang)
+    items = summarize_section(
+        cfg.name, verified,
+        require_date=cfg.require_date,
+        section_key=key,
+        lang=lang,
+        relevance_threshold=cfg.relevance_threshold,
+    )
 
     # Strip out items with stale dates (the LLM may output old dates)
-    items = _filter_items_by_date(items, days)
+    search_days = cfg.days or days
+    items = _filter_items_by_date(items, search_days)
 
     # Links were already verified in process_hits — no redundant post-verify
     return [item for item in items if item.Live_Link]
