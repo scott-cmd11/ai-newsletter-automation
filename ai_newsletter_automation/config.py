@@ -13,7 +13,7 @@ load_dotenv()
 @dataclass(frozen=True)
 class Settings:
     tavily_api_key: str
-    groq_api_key: str
+    gemini_api_key: str
     outlook_subject_prefix: str = "AI This Week | Key AI Developments You Should Know"
     run_days: int = 7
     max_per_stream: Optional[int] = None
@@ -26,15 +26,15 @@ class Settings:
 
 def get_settings() -> Settings:
     tavily = os.getenv("TAVILY_API_KEY", "")
-    groq = os.getenv("GROQ_API_KEY", "")
+    gemini = os.getenv("GEMINI_API_KEY", "")
     if not tavily:
         raise RuntimeError("Missing TAVILY_API_KEY in environment or .env")
-    if not groq:
-        raise RuntimeError("Missing GROQ_API_KEY in environment or .env")
+    if not gemini:
+        raise RuntimeError("Missing GEMINI_API_KEY in environment or .env")
 
     return Settings(
         tavily_api_key=tavily,
-        groq_api_key=groq,
+        gemini_api_key=gemini,
         outlook_subject_prefix=os.getenv(
             "OUTLOOK_SUBJECT_PREFIX",
             "AI This Week | Key AI Developments You Should Know",

@@ -19,6 +19,7 @@ class VerifiedArticle:
     snippet: str
     content: str
     published: Optional[str] = None
+    scraped_published_date: Optional[str] = None
 
 
 @dataclass

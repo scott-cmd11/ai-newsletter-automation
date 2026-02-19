@@ -4,6 +4,7 @@ import json
 import logging
 import time
 from typing import List, Optional
+from google.api_core import exceptions
 
 import requests
 
@@ -17,10 +18,10 @@ _RERANK_SYSTEM = (
     "numbered list of article titles and snippets. For EACH article, return a JSON "
     "array of objects with keys: {\"index\": <int>, \"score\": <1-10>}.\n"
     "Score meaning:\n"
-    "  1-3: Off-topic or very low relevance\n"
-    "  4-5: Tangentially related\n"
-    "  6-7: Relevant\n"
-    "  8-10: Highly relevant, must-include\n"
+    "  1-3: Off-topic, clickbait, rumors, or very low relevance\n"
+    "  4-5: Tangentially related or old news being reposted\n"
+    "  6-7: Relevant and recent\n"
+    "  8-10: Highly relevant, empirical results, or official announcements\n"
     "Return ONLY valid JSON. No markdown, no commentary."
 )
 
@@ -28,8 +29,12 @@ _RERANK_SYSTEM = (
 def _build_rerank_prompt(section_name: str, articles: List[VerifiedArticle]) -> str:
     lines = [f"Section topic: {section_name}\n\nArticles:"]
     for i, a in enumerate(articles):
-        snippet = (a.snippet or a.content or "")[:200]
-        lines.append(f"{i+1}. Title: {a.title}\n   Snippet: {snippet}")
+        # Use up to 2000 chars of content for better judgement
+        snippet = (a.content or a.snippet or "")[:2000]
+        # Clean up newlines for the prompt
+        snippet = snippet.replace("\n", " ")
+        date_str = a.scraped_published_date or a.published or "Unknown"
+        lines.append(f"{i+1}. Title: {a.title}\n   Date: {date_str}\n   Snippet: {snippet}...")
     return "\n".join(lines)
 
 
@@ -65,25 +70,36 @@ def rerank_articles(
         return articles
 
     settings = get_settings()
+    # Configure Gemini
+    import google.generativeai as genai
+    genai.configure(api_key=settings.gemini_api_key)
+    
     prompt = _build_rerank_prompt(section.name, articles)
+    
+    # Use Gemini model
+    model_name = "gemini-3-flash-preview" if "gemini" not in model else model
+    if "llama" in model_name: 
+        model_name = "gemini-3-flash-preview"
 
     try:
-        resp = requests.post(
-            "https://api.groq.com/openai/v1/chat/completions",
-            headers={"Authorization": f"Bearer {settings.groq_api_key}"},
-            json={
-                "model": model,
-                "messages": [
-                    {"role": "system", "content": _RERANK_SYSTEM},
-                    {"role": "user", "content": prompt},
-                ],
-                "temperature": 0.1,
-                "max_tokens": 512,
-            },
-            timeout=15,
+        gemini = genai.GenerativeModel(
+            model_name=model_name,
+            system_instruction=_RERANK_SYSTEM,
+            generation_config={"response_mime_type": "application/json"}
         )
-        resp.raise_for_status()
-        raw = resp.json()["choices"][0]["message"]["content"].strip()
+        
+        # Retry logic for rate limits
+        raw = ""
+        for attempt in range(5):
+            try:
+                resp = gemini.generate_content(prompt)
+                raw = resp.text.strip()
+                break
+            except (exceptions.ResourceExhausted, exceptions.ServiceUnavailable):
+                if attempt == 4:
+                    raise
+                time.sleep(5 * (2 ** attempt))
+                
         scores = _parse_scores(raw, len(articles))
     except Exception as e:
         log.warning("Reranking failed, returning articles unchanged: %s", e)

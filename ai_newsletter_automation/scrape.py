@@ -38,3 +38,52 @@ def scrape(url: str, html: Optional[str] = None) -> Optional[str]:
     text = extract_text(html)
     # Keep it reasonably bounded for LLM cost
     return text[:20_000]
+
+
+def extract_metadata(html: str) -> dict:
+    """Extract metadata (published date, etc.) from HTML."""
+    soup = BeautifulSoup(html, "html.parser")
+    meta = {}
+
+    # 1. Try standard meta tags
+    # <meta property="article:published_time" content="...">
+    # <meta name="pubdate" content="...">
+    # <meta name="date" content="...">
+    for selector in [
+        {"property": "article:published_time"},
+        {"name": "pubdate"},
+        {"name": "date"},
+        {"name": "DC.date.issued"},
+        {"name": "sailthru.date"},
+    ]:
+        tag = soup.find("meta", attrs=selector)
+        if tag and tag.get("content"):
+            meta["date"] = tag["content"]
+            break
+
+    # 2. Try JSON-LD if no meta tag found
+    if not meta.get("date"):
+        for script in soup.find_all("script", type="application/ld+json"):
+            try:
+                data = script.string
+                if not data:
+                    continue
+                # simplistic approach: regex (safer than json.load on arbitrary web junk)
+                # look for "datePublished": "..."
+                match = re.search(r'"datePublished"\s*:\s*"([^"]+)"', data)
+                if match:
+                    meta["date"] = match.group(1)
+                    break
+            except Exception:
+                continue
+
+    # 3. Try <time> tag
+    if not meta.get("date"):
+        time_tag = soup.find("time")
+        if time_tag:
+            if time_tag.get("datetime"):
+                meta["date"] = time_tag["datetime"]
+            elif time_tag.get("content"):
+                meta["date"] = time_tag["content"]
+
+    return meta

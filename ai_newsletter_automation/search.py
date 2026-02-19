@@ -1,5 +1,5 @@
 from dataclasses import replace
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, timezone
 from typing import Dict, List, Optional, Iterable
 
 import requests
@@ -8,6 +8,7 @@ from urllib.parse import urlparse, urlunparse, parse_qs, unquote
 
 from .config import get_settings
 from .models import ArticleHit, SectionConfig
+from .source_quality import SourceTracker
 
 
 # ── Domain blocklist — evergreen / non-news pages that pollute results ──
@@ -230,6 +231,24 @@ def _boost_by_keywords(hits: List[ArticleHit], boost_keywords: Optional[List[str
     return sorted(hits, key=score, reverse=True)
 
 
+def _boost_by_source_quality(hits: List[ArticleHit]) -> List[ArticleHit]:
+    """Sort articles so that domains with high historical relevance appear first.
+    
+    Uses SourceTracker to get a quality boost (0.0-1.0) for each domain.
+    """
+    tracker = SourceTracker()
+    
+    # Cache boosts to avoid repeated disk reads if SourceTracker wasn't cached
+    # (SourceTracker implementation reads JSON on every record/get_boost call in current form,
+    # but for a batch sort we can just call it. Optimization: SourceTracker could cache data)
+    
+    def score(h: ArticleHit) -> float:
+        return tracker.get_boost(h.url)
+        
+    # Stable sort: high boost first
+    return sorted(hits, key=score, reverse=True)
+
+
 # Source priority for sorting — lower number = higher priority.
 _SOURCE_PRIORITY = {
     "Google Alert": 0,
@@ -263,6 +282,11 @@ def _apply_time_decay(hits: List[ArticleHit], days: int) -> List[ArticleHit]:
         pub = _parse_date_str(h.published)
         if pub is None:
             return 0.5  # neutral — don't penalize or reward undated articles
+        
+        # Ensure naive UTC for comparison
+        if pub.tzinfo is not None:
+            pub = pub.astimezone(timezone.utc).replace(tzinfo=None)
+            
         age_days = (now - pub).total_seconds() / 86400
         return max(0.0, 1.0 - (age_days / days))
 
@@ -396,6 +420,7 @@ CURATED_FEEDS = [
     "https://blog.research.google/feeds/posts/default",     # Google Research
     "https://www.oecd.ai/feed",
     "https://hai.stanford.edu/rss.xml",
+    "https://www.oneusefulthing.org/feed",                # Ethan Mollick (Substack)
 ]
 
 

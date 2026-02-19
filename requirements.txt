@@ -6,3 +6,4 @@ click
 pydantic
 feedparser
 pytest
+google-generativeai

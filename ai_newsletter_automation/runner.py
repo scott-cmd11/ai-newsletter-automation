@@ -1,6 +1,9 @@
+import concurrent.futures
 import json
 import os
+import threading
 from collections import OrderedDict
+from dataclasses import replace
 from datetime import date, datetime, timedelta
 from pathlib import Path
 from typing import Dict, List, Callable, Optional
@@ -11,7 +14,7 @@ import requests
 from .assemble import render_newsletter
 from .config import get_settings
 from .models import SummaryItem, VerifiedArticle, ArticleHit, SectionConfig
-from .scrape import scrape
+from .scrape import scrape, extract_metadata
 from .search import (
     get_streams,
     search_stream,
@@ -26,6 +29,7 @@ from .search import (
     collect_deep_dive,
     _filter_by_keywords,
     _boost_by_keywords,
+    _boost_by_source_quality,
     _sort_by_source_priority,
     _apply_time_decay,
 )
@@ -48,20 +52,25 @@ SECTION_ORDER = [
     "deep_dive",
 ]
 
+_LOG_LOCK = threading.Lock()
+
 
 def _log_skipped(reason: str, url: str, log: Path) -> None:
     """Best-effort logging — silently skip on read-only filesystems (Vercel)."""
     try:
         log.parent.mkdir(parents=True, exist_ok=True)
-        with log.open("a", encoding="utf-8") as f:
-            f.write(json.dumps({"reason": reason, "url": url}) + "\n")
+        # Thread-safe logging
+        with _LOG_LOCK:
+            with log.open("a", encoding="utf-8") as f:
+                f.write(json.dumps({"reason": reason, "url": url}) + "\n")
     except OSError:
         # Vercel serverless: filesystem is read-only, try /tmp
         try:
             tmp_log = Path("/tmp") / "logs" / log.name
             tmp_log.parent.mkdir(parents=True, exist_ok=True)
-            with tmp_log.open("a", encoding="utf-8") as f:
-                f.write(json.dumps({"reason": reason, "url": url}) + "\n")
+            with _LOG_LOCK:
+                with tmp_log.open("a", encoding="utf-8") as f:
+                    f.write(json.dumps({"reason": reason, "url": url}) + "\n")
         except OSError:
             pass  # Give up silently — logging is non-critical
 
@@ -100,6 +109,11 @@ def process_hits(hits: List[ArticleHit], limit: int, log_file: Path) -> List[Ver
             else:
                 _log_skipped("scrape_failed", hit.url, log_file)
                 continue
+        
+        # Extract metadata (date)
+        meta = extract_metadata(html)
+        scraped_date = meta.get("date")
+
         verified.append(
             VerifiedArticle(
                 title=hit.title,
@@ -107,6 +121,7 @@ def process_hits(hits: List[ArticleHit], limit: int, log_file: Path) -> List[Ver
                 snippet=hit.snippet,
                 content=content,
                 published=hit.published,
+                scraped_published_date=scraped_date,
             )
         )
     return verified
@@ -127,7 +142,7 @@ def process_section(key: str, days: int, max_per_stream: Optional[int] = None, l
     cfg = streams[key]
 
     collectors: Dict[str, Callable[[SectionConfig], List[ArticleHit]]] = {
-        "trending": lambda c: collect_trending(days),
+        "trending": lambda c: collect_trending(c.days or days),
         "events": lambda c: collect_events(c.days or days),
         "events_public": lambda c: collect_events_public(c.days or days),
         "research_plain": lambda c: collect_research(c.days or days),
@@ -140,52 +155,120 @@ def process_section(key: str, days: int, max_per_stream: Optional[int] = None, l
 
     log_file = settings.project_root / "logs" / f"run-{date.today().isoformat()}.jsonl"
 
-    search_days = cfg.days or days
+    # Retry loop: Standard -> Expanded Window -> Relaxed Threshold
+    # Attempt 0: Standard (days=7, thresh=default)
+    # Attempt 1: Expanded (days=14, thresh=default)
+    # Attempt 2: Wide & Relaxed (days=28, thresh=lowered)
+    max_attempts = 3
+    
+    for attempt in range(max_attempts):
+        # Calculate dynamic settings for this attempt
+        multiplier = 1 + attempt  # 1, 2, 3
+        current_days = (cfg.days or days) * multiplier
+        
+        # Relax threshold on final attempt
+        current_threshold = cfg.relevance_threshold
+        if attempt == 2:
+            current_threshold = max(4, cfg.relevance_threshold - 2)
 
-    if key in collectors:
-        hits = collectors[key](cfg)
-    else:
-        hits = search_stream(cfg, search_days)
+        # Create temporary config for this run
+        run_cfg = replace(cfg, days=current_days, relevance_threshold=current_threshold)
 
-    # Apply section-level curation pipeline:
-    # 1. Keyword filtering & boosting
-    hits = _filter_by_keywords(hits, cfg.reject_keywords)
-    hits = _boost_by_keywords(hits, cfg.boost_keywords)
-    # 2. Source priority (curated feeds first)
-    hits = _sort_by_source_priority(hits)
-    # 3. Time-decay (fresher articles rank higher within window)
-    hits = _apply_time_decay(hits, search_days)
+        # 1. Collection
+        if key in collectors:
+            hits = collectors[key](run_cfg)
+        else:
+            hits = search_stream(run_cfg, current_days)
 
-    _log_skipped(f"section_{key}_total_hits={len(hits)}", "", log_file)
+        # Apply section-level curation pipeline:
+        hits = _filter_by_keywords(hits, run_cfg.reject_keywords)
+        hits = _boost_by_keywords(hits, run_cfg.boost_keywords)
+        
+        # 2b. Boost by historical source quality (SourceTracker)
+        hits = _boost_by_source_quality(hits)
 
-    verified = process_hits(hits, cfg.limit * 2, log_file)  # fetch extra for dedup/rerank
+        # 2. Source priority (curated feeds first)
+        hits = _sort_by_source_priority(hits)
+        # 3. Time-decay (fresher articles rank higher within window)
+        hits = _apply_time_decay(hits, current_days)
 
-    # 4. Semantic deduplication (remove near-duplicate articles)
-    verified = deduplicate(verified)
-    # 5. LLM-as-Judge reranking (score & filter before summarization)
-    verified = rerank_articles(verified, cfg)
-    # Trim to final limit after reranking
-    verified = verified[:cfg.limit]
+        _log_skipped(f"section_{key}_attempt_{attempt}_hits={len(hits)}", "", log_file)
 
-    items = summarize_section(
-        cfg.name, verified,
-        require_date=cfg.require_date,
-        section_key=key,
-        lang=lang,
-        relevance_threshold=cfg.relevance_threshold,
-    )
+        verified = process_hits(hits, run_cfg.limit * 2, log_file)
+        verified = deduplicate(verified)
+        verified = _filter_verified_articles_by_date(verified, current_days)
 
-    # 6. Record source quality for future runs
-    tracker = SourceTracker()
-    for item in items:
-        if item.Live_Link and item.Relevance:
-            tracker.record(item.Live_Link, item.Relevance)
+        # Rerank with potentially relaxed threshold
+        verified = rerank_articles(verified, run_cfg)
+        verified = verified[:run_cfg.limit]
 
-    # Strip out items with stale dates (the LLM may output old dates)
-    items = _filter_items_by_date(items, search_days)
+        items = summarize_section(
+            run_cfg.name, verified,
+            require_date=run_cfg.require_date,
+            section_key=key,
+            lang=lang,
+            relevance_threshold=run_cfg.relevance_threshold,
+        )
 
-    # Links were already verified in process_hits — no redundant post-verify
-    return [item for item in items if item.Live_Link]
+        # Filter by date window (LLM hallucination check)
+        items = _filter_items_by_date(items, current_days)
+        
+        final_items = [item for item in items if item.Live_Link]
+        
+        if final_items:
+            # Success! Record success metric?
+            if attempt > 0:
+                print(f"  ✓ {key} populated on retry #{attempt} (days={current_days}, thresh={current_threshold})")
+            
+            # Record source quality
+            tracker = SourceTracker()
+            for item in final_items:
+                if item.Live_Link and item.Relevance:
+                    tracker.record(item.Live_Link, item.Relevance)
+            
+            return final_items
+            
+        # If we failed, loop continues to expand search
+        
+    return [] # Failed all attempts
+
+
+def _filter_verified_articles_by_date(articles: List[VerifiedArticle], days: int) -> List[VerifiedArticle]:
+    """Remove articles where the scraped date is definitely older than the search window."""
+    cutoff = datetime.utcnow() - timedelta(days=days)
+    # Allow a small buffer (e.g. 24h) for timezone differences or late scraping
+    cutoff -= timedelta(days=1)
+    
+    kept = []
+    for a in articles:
+        if not a.scraped_published_date:
+            kept.append(a)
+            continue
+            
+        # Try to parse the scraped date
+        # It could be ISO, or other formats. We'll try a few common ones.
+        try:
+            # Most meta tags are ISO-like
+            d_str = a.scraped_published_date[:19] # Truncate potential timezone for simple parsing
+            # Try ISO format first
+            pub = None
+            for fmt in ("%Y-%m-%dT%H:%M:%S", "%Y-%m-%d", "%Y-%m-%d %H:%M:%S"):
+                try:
+                    pub = datetime.strptime(d_str, fmt)
+                    break
+                except ValueError:
+                    continue
+            
+            if pub and pub < cutoff:
+                # Definitely old
+                continue
+        except Exception:
+            # If parsing fails, be permissive and keep it
+            pass
+            
+        kept.append(a)
+        
+    return kept
 
 
 def _filter_items_by_date(items: List[SummaryItem], days: int) -> List[SummaryItem]:
@@ -222,14 +305,38 @@ def _filter_items_by_date(items: List[SummaryItem], days: int) -> List[SummaryIt
 @click.option("--max-per-stream", default=None, type=int, help="Override max items per stream.")
 @click.option("--dry-run", is_flag=True, default=False, help="Write HTML only, skip Outlook.")
 @click.option("--lang", default="en", type=click.Choice(["en", "fr"]), help="Output language.")
-def main(since_days, run_date, max_per_stream, dry_run, lang):
+@click.option("--workers", default=4, type=int, help="Number of parallel workers.")
+def main(since_days, run_date, max_per_stream, dry_run, lang, workers):
     settings = get_settings()
     days = since_days or settings.run_days
 
     sections: Dict[str, List[SummaryItem]] = OrderedDict()
+    
+    click.echo(f"Starting generation with {workers} workers...")
+
+    # Use ThreadPoolExecutor for parallel section processing
+    with concurrent.futures.ThreadPoolExecutor(max_workers=workers) as executor:
+        # Submit all tasks
+        future_to_section = {
+            executor.submit(process_section, key, days, max_per_stream, lang): key
+            for key in SECTION_ORDER
+        }
+        
+        # Collect results as they complete
+        results = {}
+        for future in concurrent.futures.as_completed(future_to_section):
+            key = future_to_section[future]
+            try:
+                data = future.result()
+                results[key] = data
+                click.echo(f"  ✓ {key} done")
+            except Exception as exc:
+                click.echo(f"  ✗ {key} generated an exception: {exc}")
+                results[key] = []
+
+    # Reassemble in correct order
     for key in SECTION_ORDER:
-        click.echo(f"  ▸ {key}...")
-        sections[key] = process_section(key, days, max_per_stream, lang=lang)
+        sections[key] = results.get(key, [])
 
     # Generate TL;DR from the top-relevance items across all sections
     click.echo("  ▸ generating TL;DR...")
@@ -249,4 +356,3 @@ def main(since_days, run_date, max_per_stream, dry_run, lang):
 
 if __name__ == "__main__":
     main()
-
