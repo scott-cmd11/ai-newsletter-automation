@@ -37,7 +37,7 @@ BLOCKED_URL_PATTERNS = (
 DEFAULT_STREAMS: Dict[str, SectionConfig] = {
     "trending": SectionConfig(
         name="Trending AI",
-        query="AI artificial intelligence top news of the week",
+        query='"artificial intelligence" OR "AI" major announcement OR launch OR release this week',
         limit=8,
     ),
     "canadian": SectionConfig(
@@ -47,39 +47,39 @@ DEFAULT_STREAMS: Dict[str, SectionConfig] = {
     ),
     "global": SectionConfig(
         name="Global News",
-        query='("AI" OR "Artificial Intelligence") AND (release OR policy OR workforce)',
+        query='"AI" AND (regulation OR governance OR "executive order" OR policy) AND (EU OR US OR UK OR G7 OR OECD OR UN) -Canada',
         limit=5,
     ),
     "events": SectionConfig(
         name="Events",
-        query='AI webinar OR AI conference OR "artificial intelligence" talk',
+        query='AI conference OR AI summit OR "artificial intelligence" event OR "machine learning" workshop 2026',
         limit=4,
         require_date=True,
     ),
     "events_public": SectionConfig(
         name="Public-Servant Events",
-        query='"artificial intelligence" training OR webinar site:csps-efpc.gc.ca',
+        query='"artificial intelligence" AND (training OR webinar OR course) AND ("Government of Canada" OR "public service" OR CSPS)',
         limit=4,
         require_date=True,
     ),
     "agri": SectionConfig(
         name="Grain / Agri-Tech",
-        query='("Machine Learning" OR "AI") AND ("Grain Quality" OR Agriculture)',
+        query='("Machine Learning" OR "AI") AND ("Grain Quality" OR Agriculture OR "precision agriculture" OR "crop prediction")',
         limit=3,
     ),
     "ai_progress": SectionConfig(
         name="AI Progress",
-        query="AI benchmark results",
+        query='"AI model" AND (benchmark OR SOTA OR "state of the art" OR leaderboard) new results',
         limit=3,
     ),
     "research_plain": SectionConfig(
         name="Plain-Language Research",
-        query="arXiv AI",
+        query='AI research breakthrough OR "large language model" new paper OR "machine learning" novel approach 2026',
         limit=3,
     ),
     "deep_dive": SectionConfig(
         name="Deep Dive",
-        query='(OECD OR Anthropic OR MIT OR METR) AND ("AI" OR "Artificial Intelligence") report',
+        query='(OECD OR Anthropic OR MIT OR METR OR NIST OR "World Economic Forum") AND "AI" AND (report OR whitepaper OR framework)',
         limit=2,
     ),
 }
@@ -143,16 +143,22 @@ def _parse_date_str(date_str: Optional[str]) -> Optional[datetime]:
     return None
 
 
+# Sources whose articles are trusted enough to keep even without a date.
+_TRUSTED_SOURCES = {"Google Alert", "arXiv", "PapersWithCode", "RSS"}
+
+
 def _filter_by_date(hits: List[ArticleHit], days: int) -> List[ArticleHit]:
     """Remove hits whose published date is outside the search window.
-    Articles with no parseable date are also rejected — undated content
-    frequently turns out to be stale evergreen pages."""
+    Articles with no parseable date are rejected UNLESS they come from a
+    trusted source (curated RSS, Google Alerts, arXiv, etc.)."""
     cutoff = datetime.utcnow() - timedelta(days=days)
     filtered = []
     for h in hits:
         pub = _parse_date_str(h.published)
         if pub is None:
-            # No date — reject to avoid stale content
+            # No date — allow through only if from a trusted source
+            if h.source and h.source in _TRUSTED_SOURCES:
+                filtered.append(h)
             continue
         if pub < cutoff:
             # Too old — skip
@@ -282,12 +288,12 @@ def fetch_producthunt_trending(limit: int = 10, days: int = 7) -> List[ArticleHi
 
 CURATED_FEEDS = [
     "https://blog.openai.com/rss/",
-    "https://feedproxy.feedly.com/5b36e586-cfce-45df-9d64-1cf9fed78e5b",  # Anthropic
-    "https://deepmind.com/blog/feed/basic/",
-    "http://research.microsoft.com/rss/news.xml",
-    "http://www.technologyreview.com/rss/rss.aspx",
-    "https://ai.facebook.com/blog/rss",
-    "https://ai.googleblog.com/atom.xml",
+    "https://www.anthropic.com/feed",                       # Anthropic
+    "https://blog.google/technology/ai/rss/",               # Google AI
+    "https://blogs.microsoft.com/ai/feed/",                 # Microsoft AI
+    "https://www.technologyreview.com/feed/",               # MIT Tech Review
+    "https://ai.meta.com/blog/rss/",                        # Meta AI
+    "https://blog.research.google/feeds/posts/default",     # Google Research
     "https://www.oecd.ai/feed",
     "https://hai.stanford.edu/rss.xml",
 ]
@@ -435,35 +441,46 @@ CSPS_DOMAINS = ["csps-efpc.gc.ca", "canada.ca"]
 
 def collect_events_public(days: int) -> List[ArticleHit]:
     settings = get_settings()
-    payload = {
-        "query": '"artificial intelligence" AND (webinar OR event OR course OR training) site:csps-efpc.gc.ca',
-        "api_key": settings.tavily_api_key,
-        "max_results": 20,
-        "search_depth": "advanced",
-        "include_domains": CSPS_DOMAINS,
-        "days": days,
-    }
-    try:
-        resp = requests.post("https://api.tavily.com/search", json=payload, timeout=20)
-        resp.raise_for_status()
-        data = resp.json()
-    except Exception:
-        return []
-
+    # Try multiple queries for broader coverage of government AI events
+    queries = [
+        {
+            "query": '"artificial intelligence" AND (webinar OR event OR course OR training) site:csps-efpc.gc.ca',
+            "include_domains": CSPS_DOMAINS,
+        },
+        {
+            "query": '"artificial intelligence" AND (training OR course) AND ("Government of Canada" OR "public service")',
+            "include_domains": None,
+        },
+    ]
     hits: List[ArticleHit] = []
-    for res in data.get("results", []):
-        url = res.get("url", "")
-        if _is_blocked_url(url):
+    for q in queries:
+        payload = {
+            "query": q["query"],
+            "api_key": settings.tavily_api_key,
+            "max_results": 15,
+            "search_depth": "advanced",
+            "include_domains": q.get("include_domains"),
+            "days": days,
+        }
+        try:
+            resp = requests.post("https://api.tavily.com/search", json=payload, timeout=20)
+            resp.raise_for_status()
+            data = resp.json()
+        except Exception:
             continue
-        hits.append(
-            ArticleHit(
-                title=res.get("title", "").strip(),
-                url=url,
-                snippet=res.get("content", "").strip(),
-                source=res.get("source"),
-                published=res.get("published_date"),
+        for res in data.get("results", []):
+            url = res.get("url", "")
+            if _is_blocked_url(url):
+                continue
+            hits.append(
+                ArticleHit(
+                    title=res.get("title", "").strip(),
+                    url=url,
+                    snippet=res.get("content", "").strip(),
+                    source=res.get("source"),
+                    published=res.get("published_date"),
+                )
             )
-        )
     return _dedupe(hits)
 
 
@@ -545,6 +562,8 @@ def _fetch_pwc_trending(limit: int = 10, days: int = 30) -> List[ArticleHit]:
 def collect_ai_progress(days: int) -> List[ArticleHit]:
     hits: List[ArticleHit] = []
     hits.extend(_fetch_pwc_trending(limit=15, days=days))
+    # Tavily fallback — PapersWithCode RSS is often empty for short windows
+    hits.extend(search_stream(DEFAULT_STREAMS["ai_progress"], days))
     return _dedupe(hits)
 
 
@@ -662,10 +681,43 @@ def collect_events(days: int) -> List[ArticleHit]:
 # ── Deep Dive (long-form reports from major orgs) ──
 
 
+REPORT_FEEDS = [
+    "https://www.nist.gov/artificial-intelligence/rss.xml",
+]
+
+
 def collect_deep_dive(days: int) -> List[ArticleHit]:
-    """Search for in-depth AI reports from OECD, Anthropic, MIT, METR, etc."""
+    """Search for in-depth AI reports from OECD, Anthropic, MIT, METR, NIST, etc."""
     hits: List[ArticleHit] = []
+    # Tavily search
     hits.extend(search_stream(DEFAULT_STREAMS["deep_dive"], days))
+    # RSS feeds from report-publishing orgs
+    cutoff = datetime.utcnow() - timedelta(days=days)
+    for url in REPORT_FEEDS:
+        try:
+            feed = feedparser.parse(url)
+            for entry in feed.entries[:8]:
+                published = entry.get("published_parsed") or entry.get("updated_parsed")
+                if published:
+                    pub_dt = datetime(*published[:6])
+                    if pub_dt < cutoff:
+                        continue
+                else:
+                    continue
+                link = entry.get("link", "")
+                if _is_blocked_url(link):
+                    continue
+                hits.append(
+                    ArticleHit(
+                        title=entry.get("title", ""),
+                        url=link,
+                        snippet=entry.get("summary", "")[:500],
+                        source="RSS",
+                        published=entry.get("published"),
+                    )
+                )
+        except Exception:
+            continue
     return _dedupe(hits)
 
 
