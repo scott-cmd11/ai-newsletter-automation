@@ -6,14 +6,15 @@ from ai_newsletter_automation.search import (
 )
 
 
-def test_filter_by_date_allows_dateless():
-    """Articles with no published date should be allowed through (trusted RSS sources)."""
+def test_filter_by_date_rejects_dateless():
+    """Articles with no published date should be rejected to avoid stale content."""
     hits = [
         ArticleHit(title="No Date", url="https://example.com/1", snippet="s"),
         ArticleHit(title="Has Date", url="https://example.com/2", snippet="s", published="2026-02-18"),
     ]
     filtered = _filter_by_date(hits, days=30)
-    assert len(filtered) == 2
+    assert len(filtered) == 1
+    assert filtered[0].title == "Has Date"
 
 
 def test_filter_by_date_rejects_old():

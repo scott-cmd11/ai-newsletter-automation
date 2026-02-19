@@ -1,7 +1,7 @@
 import json
 import os
 from collections import OrderedDict
-from datetime import date
+from datetime import date, datetime, timedelta
 from pathlib import Path
 from typing import Dict, List, Callable, Optional
 
@@ -25,7 +25,7 @@ from .search import (
     collect_global,
     collect_deep_dive,
 )
-from .summarize import summarize_section
+from .summarize import summarize_section, generate_tldr
 from .verify import verify_link
 
 
@@ -122,9 +122,9 @@ def process_section(key: str, days: int, max_per_stream: Optional[int] = None) -
     collectors: Dict[str, Callable[[SectionConfig], List[ArticleHit]]] = {
         "trending": lambda c: collect_trending(days),
         "events": lambda c: collect_events(c.days or days),
-        "events_public": lambda c: collect_events_public(c.days or 30),
+        "events_public": lambda c: collect_events_public(c.days or days),
         "research_plain": lambda c: collect_research(c.days or days),
-        "ai_progress": lambda c: collect_ai_progress(c.days or 30),
+        "ai_progress": lambda c: collect_ai_progress(c.days or days),
         "canadian": lambda c: collect_canadian(c.days or days),
         "agri": lambda c: collect_agri(c.days or days),
         "global": lambda c: collect_global(c.days or days),
@@ -144,8 +144,39 @@ def process_section(key: str, days: int, max_per_stream: Optional[int] = None) -
     verified = process_hits(hits, cfg.limit, log_file)
     items = summarize_section(cfg.name, verified, require_date=cfg.require_date, section_key=key)
 
+    # Strip out items with stale dates (the LLM may output old dates)
+    items = _filter_items_by_date(items, days)
+
     # Links were already verified in process_hits — no redundant post-verify
     return [item for item in items if item.Live_Link]
+
+
+def _filter_items_by_date(items: List[SummaryItem], days: int) -> List[SummaryItem]:
+    """Remove SummaryItems whose LLM-generated Date is older than the window."""
+    cutoff = date.today() - timedelta(days=days)
+    filtered = []
+    for item in items:
+        if not item.Date:
+            # No date on item — keep it (date wasn't available)
+            filtered.append(item)
+            continue
+        try:
+            # Try parsing common LLM date formats
+            d = item.Date.strip()
+            parsed = None
+            for fmt in ("%Y-%m-%d", "%B %d, %Y", "%b %d, %Y", "%d %B %Y", "%d %b %Y"):
+                try:
+                    parsed = datetime.strptime(d, fmt).date()
+                    break
+                except ValueError:
+                    continue
+            if parsed and parsed < cutoff:
+                # Date is too old — skip this item
+                continue
+        except Exception:
+            pass
+        filtered.append(item)
+    return filtered
 
 
 @click.command()
@@ -162,7 +193,13 @@ def main(since_days, run_date, max_per_stream, dry_run):
         click.echo(f"  ▸ {key}...")
         sections[key] = process_section(key, days, max_per_stream)
 
-    html = render_newsletter(sections, run_date=run_date or date.today().isoformat())
+    # Generate TL;DR from the top-relevance items across all sections
+    click.echo("  ▸ generating TL;DR...")
+    all_items = [item for items in sections.values() for item in items]
+    all_items.sort(key=lambda x: x.Relevance or 0, reverse=True)
+    tldr = generate_tldr(all_items[:6])
+
+    html = render_newsletter(sections, run_date=run_date or date.today().isoformat(), tldr=tldr)
 
     output_path = settings.project_root / "output" / "newsletter.html"
     output_path.parent.mkdir(parents=True, exist_ok=True)

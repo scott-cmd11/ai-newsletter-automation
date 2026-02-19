@@ -27,6 +27,8 @@ class SummaryItem:
     Summary_Text: str
     Live_Link: str
     Date: Optional[str] = None  # ISO string if present (events)
+    Relevance: Optional[int] = None  # 1-10 relevance rating from LLM
+    Source: Optional[str] = None  # origin badge e.g. "arXiv", "TBS", "OECD"
 
 
 @dataclass

@@ -2,12 +2,11 @@ import json
 import sys
 import os
 from http.server import BaseHTTPRequestHandler
-from datetime import date
 
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), ".."))
 
-from ai_newsletter_automation.assemble import render_newsletter
 from ai_newsletter_automation.models import SummaryItem
+from ai_newsletter_automation.summarize import generate_tldr
 
 
 class handler(BaseHTTPRequestHandler):
@@ -25,29 +24,26 @@ class handler(BaseHTTPRequestHandler):
             self.wfile.write(json.dumps({"error": "Invalid JSON body"}).encode())
             return
 
-        sections = {}
-        for key, items_raw in data.get("sections", {}).items():
-            sections[key] = [
-                SummaryItem(
-                    Headline=it.get("Headline", ""),
-                    Summary_Text=it.get("Summary_Text", ""),
-                    Live_Link=it.get("Live_Link", ""),
-                    Date=it.get("Date"),
-                    Relevance=it.get("Relevance"),
-                    Source=it.get("Source"),
-                )
-                for it in items_raw
-            ]
+        items_raw = data.get("items", [])
+        items = [
+            SummaryItem(
+                Headline=it.get("Headline", ""),
+                Summary_Text=it.get("Summary_Text", ""),
+                Live_Link=it.get("Live_Link", ""),
+                Date=it.get("Date"),
+                Relevance=it.get("Relevance"),
+                Source=it.get("Source"),
+            )
+            for it in items_raw
+        ]
 
-        run_date = data.get("run_date", date.today().isoformat())
-        tldr = data.get("tldr", [])
-        html = render_newsletter(sections, run_date=run_date, tldr=tldr)
+        tldr = generate_tldr(items)
 
         self.send_response(200)
-        self.send_header("Content-Type", "text/html; charset=utf-8")
+        self.send_header("Content-Type", "application/json")
         self.send_header("Access-Control-Allow-Origin", "*")
         self.end_headers()
-        self.wfile.write(html.encode("utf-8"))
+        self.wfile.write(json.dumps({"tldr": tldr}).encode())
 
     def do_OPTIONS(self):
         self.send_response(204)

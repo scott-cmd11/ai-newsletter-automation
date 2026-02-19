@@ -51,6 +51,8 @@ class handler(BaseHTTPRequestHandler):
                         "Summary_Text": item.Summary_Text,
                         "Live_Link": item.Live_Link,
                         "Date": item.Date,
+                        "Relevance": item.Relevance,
+                        "Source": item.Source,
                     }
                     for item in items
                 ],

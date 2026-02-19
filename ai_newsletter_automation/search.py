@@ -61,7 +61,6 @@ DEFAULT_STREAMS: Dict[str, SectionConfig] = {
         query='"artificial intelligence" training OR webinar site:csps-efpc.gc.ca',
         limit=4,
         require_date=True,
-        days=30,
     ),
     "agri": SectionConfig(
         name="Grain / Agri-Tech",
@@ -72,7 +71,6 @@ DEFAULT_STREAMS: Dict[str, SectionConfig] = {
         name="AI Progress",
         query="AI benchmark results",
         limit=3,
-        days=30,
     ),
     "research_plain": SectionConfig(
         name="Plain-Language Research",
@@ -147,14 +145,17 @@ def _parse_date_str(date_str: Optional[str]) -> Optional[datetime]:
 
 def _filter_by_date(hits: List[ArticleHit], days: int) -> List[ArticleHit]:
     """Remove hits whose published date is outside the search window.
-    Hits with no parseable date are ALLOWED through — RSS sources are
-    trusted and rejecting dateless articles caused too much attrition."""
+    Articles with no parseable date are also rejected — undated content
+    frequently turns out to be stale evergreen pages."""
     cutoff = datetime.utcnow() - timedelta(days=days)
     filtered = []
     for h in hits:
         pub = _parse_date_str(h.published)
-        if pub is not None and pub < cutoff:
-            # Has a date and it's too old — skip
+        if pub is None:
+            # No date — reject to avoid stale content
+            continue
+        if pub < cutoff:
+            # Too old — skip
             continue
         filtered.append(h)
     return filtered

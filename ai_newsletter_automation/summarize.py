@@ -8,16 +8,44 @@ from .config import get_settings
 from .models import SummaryItem, VerifiedArticle
 
 
-SYSTEM_PROMPT_BASE = """You are a concise analyst producing copy for a weekly AI briefing.
-Requirements:
-- Output ONLY valid JSON array (no prose) of objects with keys: "Headline", "Summary_Text", "Live_Link", "Relevance", "Date".
-- "Summary_Text" must be 1-2 crisp sentences, neutral tone, no sales language.
-- "Relevance" must be an integer 1-10 rating of how relevant and timely the article is for a weekly AI briefing. Rate 8-10 for breaking news or major announcements from the past week, 5-7 for useful but not urgent, 1-4 for old, generic, or off-topic content.
-- "Date" must be the article's publication date in YYYY-MM-DD format. Use the Published date provided with each article. If no date is available, use your best estimate but never omit this field.
-- Preserve URLs exactly as provided — use the specific article URL, never a homepage or generic domain.
-- Do not invent facts or links; rely solely on provided article content.
-- SKIP articles that are clearly outdated (mentioning dates from months/years ago as recent), generic overview pages (Wikipedia, "What is AI?" articles), or have no substantive news content.
-- If an article has no meaningful content or the URL points to a homepage rather than a specific article, omit it entirely."""
+SYSTEM_PROMPT_BASE = """You are the senior editorial analyst for "AI This Week,"
+a trusted weekly AI briefing read by Canadian federal public servants.
+
+VOICE & TONE:
+- Authoritative but approachable — like a smart colleague briefing you over coffee.
+- Write for a Deputy Minister who has 3 minutes. Be razor-sharp.
+- No hype, no sales language, no "groundbreaking" or "revolutionary."
+- Plain language first; define technical terms in parentheses if unavoidable.
+
+OUTPUT FORMAT:
+- Output ONLY a valid JSON array (no prose) of objects with these keys:
+  "Headline", "Summary_Text", "Live_Link", "Relevance", "Date", "Source"
+- "Headline": max 12 words. Punchy. Lead with the IMPACT, not the organization.
+  BAD: "OpenAI Releases New Model"
+  GOOD: "New GPT-5 Scores 92% on Federal Policy Benchmarks"
+- "Summary_Text": exactly 2 sentences. Sentence 1 = what happened.
+  Sentence 2 = why a Canadian public servant should care (operational impact,
+  policy implication, or learning opportunity).
+- "Date": article's publication date in YYYY-MM-DD format from the Published
+  field provided. If unavailable, give best estimate but never omit.
+- "Relevance": integer 1-10. Score 8-10 for: Canadian government impact, federal
+  policy changes, AI tools usable in public service, security/privacy implications
+  for government data. Score 5-7 for: general industry news with indirect relevance.
+  Score 1-4 for: old news, generic explainers, or content with no public-sector angle.
+- "Source": short label for where this article comes from (e.g. "Reuters",
+  "arXiv", "TBS", "OECD", "Hacker News", "OpenAI Blog"). Use the domain or
+  organization name — keep it under 3 words.
+
+LINK INTEGRITY:
+- Preserve URLs EXACTLY as provided — use the specific article URL, never a homepage.
+- Do not fabricate or modify URLs.
+
+QUALITY GATES — SKIP articles that are:
+- Clearly outdated (mentioning past dates as "recent")
+- Generic explainers ("What is AI?", Wikipedia-style content)
+- Press releases with no substantive news
+- Paywalled with no useful snippet
+- Homepage URLs rather than specific articles"""
 
 
 def _build_prompt(articles: List[VerifiedArticle]) -> str:
@@ -50,6 +78,8 @@ def _parse_json(raw: str) -> List[SummaryItem]:
                 Summary_Text=obj.get("Summary_Text", "").strip(),
                 Live_Link=obj.get("Live_Link", "").strip(),
                 Date=obj.get("Date"),
+                Relevance=relevance,
+                Source=obj.get("Source", "").strip() or None,
             )
         )
     return items
@@ -104,14 +134,58 @@ def summarize_section(
     extra_rules = ""
     if section_key == "research_plain":
         extra_rules = (
-            "\n- Make summaries plain-language for non-technical readers; avoid jargon; include a short 'Why it matters for public service' clause."
+            "\n- Translate academic findings into plain language a non-technical "
+            "executive can act on. Replace jargon with everyday equivalents."
+            "\n- Sentence 2 MUST answer: 'How could this change how we deliver "
+            "services or make policy decisions?'"
         )
     elif section_key == "ai_progress":
         extra_rules = (
-            "\n- Mention the benchmark or metric and what improved; one sentence impact for government services."
+            "\n- Lead with the benchmark name and the improvement metric "
+            "(e.g., '12% accuracy gain on…')."
+            "\n- Sentence 2: one concrete implication for government operations "
+            "(e.g., 'could reduce manual document review time by…')."
         )
     elif section_key in {"events_public", "events"}:
-        extra_rules = "\n- Highlight what/when/who in one sentence."
+        extra_rules = (
+            "\n- Format: What event → When (date) → Who it's for → "
+            "How to register (if URL available)."
+            "\n- Prioritize free/government-accessible events. Flag cost if applicable."
+        )
+    elif section_key == "canadian":
+        extra_rules = (
+            "\n- Prioritize: federal policy announcements, TBS directives, "
+            "provincial AI strategies, Canadian AI company milestones."
+            "\n- Always mention which level of government (federal/provincial/municipal) "
+            "or which department is involved."
+        )
+    elif section_key == "global":
+        extra_rules = (
+            "\n- Focus on AI governance, regulation, and workforce policy from "
+            "G7/OECD/EU/US that could influence Canadian federal policy."
+            "\n- Sentence 2: note any direct relevance to Canada's AI strategy "
+            "or existing GC directives."
+        )
+    elif section_key == "agri":
+        extra_rules = (
+            "\n- Focus on precision agriculture, grain quality AI, crop prediction, "
+            "and supply chain optimization."
+            "\n- Sentence 2: connect to Canadian agricultural priorities "
+            "(CGC, canola, wheat, grain logistics)."
+        )
+    elif section_key == "deep_dive":
+        extra_rules = (
+            "\n- These are long-form reports. Summarize the single most important "
+            "finding or recommendation."
+            "\n- Sentence 2: what action or awareness shift this demands from "
+            "a Canadian federal policy lens."
+        )
+    elif section_key == "trending":
+        extra_rules = (
+            "\n- Capture the biggest AI stories of the week that everyone is talking about."
+            "\n- Sentence 2: why this matters beyond the tech — workforce, policy, or "
+            "service delivery implications."
+        )
     system_prompt = SYSTEM_PROMPT_BASE + extra_rules
 
     user_prompt = f"Section: {section_name}\nToday's date: {time.strftime('%Y-%m-%d')}\nSummarize the following verified articles:\n{_build_prompt(articles)}"
@@ -157,4 +231,65 @@ def summarize_section(
             # Rate-limited even after retries — try next model
             continue
 
+    return []
+
+
+# ── TL;DR Executive Summary ──
+
+TLDR_SYSTEM_PROMPT = """You produce a 3-bullet executive summary for a weekly AI briefing
+read by Canadian federal public servants.
+
+Rules:
+- Output ONLY a valid JSON array of exactly 3 strings.
+- Each string is one punchy sentence (max 25 words).
+- Lead each bullet with a strong verb or the key impact.
+- Cover the 3 most important stories from the items provided.
+- Write for a Deputy Minister scanning on their phone."""
+
+
+def generate_tldr(
+    top_items: List[SummaryItem],
+    model: str = "llama-3.3-70b-versatile",
+) -> List[str]:
+    """Generate 3-bullet TL;DR from the highest-relevance newsletter items."""
+    if not top_items:
+        return []
+
+    settings = get_settings()
+    items_text = "\n".join(
+        f"- {it.Headline}: {it.Summary_Text}" for it in top_items[:6]
+    )
+    user_prompt = f"Pick the 3 most important and produce 3 bullets:\n{items_text}"
+
+    url = "https://api.groq.com/openai/v1/chat/completions"
+    headers = {
+        "Authorization": f"Bearer {settings.groq_api_key}",
+        "Content-Type": "application/json",
+    }
+
+    try:
+        data = _groq_request(
+            url, headers,
+            {
+                "model": model,
+                "temperature": 0.2,
+                "max_tokens": 400,
+                "messages": [
+                    {"role": "system", "content": TLDR_SYSTEM_PROMPT},
+                    {"role": "user", "content": user_prompt},
+                ],
+            },
+        )
+        raw = data["choices"][0]["message"]["content"].strip()
+        cleaned = raw
+        if cleaned.startswith("```"):
+            cleaned = cleaned.split("\n", 1)[1] if "\n" in cleaned else cleaned[3:]
+            if cleaned.endswith("```"):
+                cleaned = cleaned[:-3]
+            cleaned = cleaned.strip()
+        bullets = json.loads(cleaned)
+        if isinstance(bullets, list):
+            return [str(b).strip() for b in bullets[:3]]
+    except Exception:
+        pass
     return []

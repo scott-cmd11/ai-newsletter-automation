@@ -162,10 +162,34 @@ async function generateNewsletter() {
 
     try {
         const today = new Date().toISOString().slice(0, 10);
+
+        // Collect top-relevance items for TL;DR
+        const allItems = Object.values(allSections).flat();
+        allItems.sort((a, b) => (b.Relevance || 0) - (a.Relevance || 0));
+        const topItems = allItems.slice(0, 6);
+
+        // Generate TL;DR via server
+        let tldr = [];
+        if (topItems.length > 0) {
+            try {
+                const tldrResp = await fetch("/api/tldr", {
+                    method: "POST",
+                    headers: { "Content-Type": "application/json" },
+                    body: JSON.stringify({ items: topItems }),
+                });
+                if (tldrResp.ok) {
+                    const tldrData = await tldrResp.json();
+                    tldr = tldrData.tldr || [];
+                }
+            } catch (e) {
+                console.warn("TL;DR generation failed, continuing without it", e);
+            }
+        }
+
         const renderResp = await fetch("/api/render", {
             method: "POST",
             headers: { "Content-Type": "application/json" },
-            body: JSON.stringify({ sections: allSections, run_date: today }),
+            body: JSON.stringify({ sections: allSections, run_date: today, tldr: tldr }),
         });
 
         if (!renderResp.ok) {
