@@ -68,7 +68,10 @@
         <div id="progress-container" class="progress-container" style="display: none;">
             <div class="progress-header">
                 <span id="progress-text" class="progress-label">Generating...</span>
-                <span id="progress-count" class="progress-count">0 / 9</span>
+                <div style="display: flex; align-items: center; gap: 16px;">
+                    <span id="progress-time" class="progress-time"></span>
+                    <span id="progress-count" class="progress-count">0 / 9</span>
+                </div>
             </div>
             <div class="progress-bar-bg">
                 <div id="progress-bar" class="progress-bar-fill"></div>

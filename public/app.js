@@ -15,6 +15,9 @@ const SECTIONS = [
 ];
 
 let generatedHTML = null;
+let _startTime = null;
+let _timerInterval = null;
+let _sectionTimes = [];   // track how long each section takes
 
 /* ── Helpers ────────────────────────────── */
 
@@ -55,9 +58,41 @@ function initProgress() {
     $("progress-bar").style.width = "0%";
     $("progress-count").textContent = `0 / ${SECTIONS.length}`;
     $("progress-text").textContent = "Starting generation…";
+    $("progress-time").textContent = "Est. 3–5 min";
     setVisible("progress-container", true);
     setVisible("error-container", false);
     setVisible("result-container", false);
+
+    // Start elapsed timer
+    _startTime = Date.now();
+    _sectionTimes = [];
+    if (_timerInterval) clearInterval(_timerInterval);
+    _timerInterval = setInterval(_updateTimer, 1000);
+}
+
+function _formatTime(ms) {
+    const totalSec = Math.floor(ms / 1000);
+    const m = Math.floor(totalSec / 60);
+    const s = totalSec % 60;
+    return `${m}:${s.toString().padStart(2, "0")}`;
+}
+
+function _updateTimer() {
+    if (!_startTime) return;
+    const elapsed = Date.now() - _startTime;
+    const done = _sectionTimes.length;
+    const remaining = SECTIONS.length - done;
+
+    let timeText = `Elapsed: ${_formatTime(elapsed)}`;
+    if (done > 0 && remaining > 0) {
+        const avgPerSection = elapsed / done;
+        const estRemaining = avgPerSection * remaining;
+        timeText += ` · ~${_formatTime(estRemaining)} remaining`;
+    } else if (remaining === 0) {
+        timeText = `Completed in ${_formatTime(elapsed)}`;
+        if (_timerInterval) { clearInterval(_timerInterval); _timerInterval = null; }
+    }
+    $("progress-time").textContent = timeText;
 }
 
 function updateProgress(completed, currentLabel) {
@@ -85,6 +120,7 @@ async function generateNewsletter() {
     const allSections = {};
     let completed = 0;
     let hasErrors = false;
+    let _sectionStart = Date.now();
 
     for (const section of SECTIONS) {
         setChipState(section.key, "active");
@@ -115,6 +151,9 @@ async function generateNewsletter() {
         }
 
         completed++;
+        _sectionTimes.push(Date.now() - _sectionStart);
+        _sectionStart = Date.now();
+        _updateTimer();
         updateProgress(completed, completed < SECTIONS.length ? SECTIONS[completed]?.label : null);
     }
 
