@@ -53,7 +53,6 @@ SECTION_DESCRIPTIONS_FR: Dict[str, str] = {
 UI_STRINGS = {
     "en": {
         "title": "AI This Week",
-        "subtitle": "Your weekly AI briefing for the Canadian public service",
         "date_label": "Date:",
         "tldr_title": "⚡ TL;DR — This Week's Top 3",
         "top_story": "🔥 Top Story",
@@ -63,7 +62,6 @@ UI_STRINGS = {
     },
     "fr": {
         "title": "IA cette semaine",
-        "subtitle": "Votre bulletin hebdomadaire sur l'IA pour la fonction publique canadienne",
         "date_label": "Date :",
         "tldr_title": "⚡ En bref — Les 3 faits saillants",
         "top_story": "🔥 À la une",
