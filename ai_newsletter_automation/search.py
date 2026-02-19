@@ -583,10 +583,78 @@ def collect_global(days: int) -> List[ArticleHit]:
 # ── Events (general AI conferences / webinars) ──
 
 
-def collect_events(days: int) -> List[ArticleHit]:
-    """Search for upcoming AI events, conferences, and webinars."""
+EVENT_FEEDS = [
+    "https://www.aiconference.com/feed/",
+    "https://developer.nvidia.com/blog/feed/",
+    "https://events.linuxfoundation.org/feed/",
+]
+
+EVENT_QUERIES = [
+    SectionConfig(name="Events", query='AI conference OR AI summit OR "artificial intelligence" event 2026', limit=4, require_date=True),
+    SectionConfig(name="Events", query='AI webinar OR AI workshop OR "machine learning" event upcoming', limit=4, require_date=True),
+]
+
+
+def _fetch_event_feeds(days: int) -> List[ArticleHit]:
+    """Fetch AI event announcements from RSS feeds."""
     hits: List[ArticleHit] = []
-    hits.extend(search_stream(DEFAULT_STREAMS["events"], days))
+    cutoff = datetime.utcnow() - timedelta(days=days)
+    for url in EVENT_FEEDS:
+        try:
+            feed = feedparser.parse(url)
+            for entry in feed.entries[:10]:
+                title = entry.get("title", "").lower()
+                # only keep entries that look event-related
+                if not any(k in title for k in ("conference", "summit", "event", "webinar", "workshop", "meetup", "hackathon", "ai", "ml")):
+                    continue
+                published = entry.get("published_parsed") or entry.get("updated_parsed")
+                if published:
+                    pub_dt = datetime(*published[:6])
+                    if pub_dt < cutoff:
+                        continue
+                else:
+                    continue
+                link = entry.get("link", "")
+                if _is_blocked_url(link):
+                    continue
+                hits.append(
+                    ArticleHit(
+                        title=entry.get("title", ""),
+                        url=link,
+                        snippet=entry.get("summary", "")[:400],
+                        source="RSS",
+                        published=entry.get("published"),
+                    )
+                )
+        except Exception:
+            continue
+    return hits
+
+
+def collect_events(days: int) -> List[ArticleHit]:
+    """Search for upcoming AI events — multiple sources for resilience."""
+    hits: List[ArticleHit] = []
+
+    # RSS feeds first
+    try:
+        hits.extend(_fetch_event_feeds(days))
+    except Exception:
+        pass
+
+    # Multiple Tavily queries as fallback
+    for query_cfg in EVENT_QUERIES:
+        try:
+            hits.extend(search_stream(query_cfg, days))
+        except Exception:
+            continue
+
+    # Original default query as final fallback
+    if not hits:
+        try:
+            hits.extend(search_stream(DEFAULT_STREAMS["events"], days))
+        except Exception:
+            pass
+
     return _dedupe(hits)
 
 
