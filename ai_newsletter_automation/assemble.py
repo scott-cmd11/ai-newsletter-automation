@@ -58,8 +58,8 @@ UI_STRINGS = {
         "tldr_title": "⚡ TL;DR — This Week's Top 3",
         "top_story": "🔥 Top Story",
         "read_more": "Read more →",
-        "footer_line1": "🍁 AI This Week — Automated AI briefing for Canadian public servants.",
-        "footer_line2": "Curated with care. Powered by open-source intelligence.",
+        "footer_line1": "AI This Week",
+        "footer_line2": "Automated Briefing System",
     },
     "fr": {
         "title": "IA cette semaine",
