@@ -250,7 +250,7 @@ def process_section(key: str, days: int, max_per_stream: Optional[int] = None, l
         if final_items:
             # Success! Record success metric?
             if attempt > 0:
-                print(f"  ✓ {key} populated on retry #{attempt} (days={current_days}, thresh={current_threshold})")
+                print(f"  [OK] {key} populated on retry #{attempt} (days={current_days}, thresh={current_threshold})")
             
             # Record source quality
             tracker = SourceTracker()
@@ -361,9 +361,9 @@ def main(since_days, run_date, max_per_stream, dry_run, lang, workers):
             try:
                 data = future.result()
                 results[key] = data
-                click.echo(f"  ✓ {key} done")
+                click.echo(f"  [OK] {key} done")
             except Exception as exc:
-                click.echo(f"  ✗ {key} generated an exception: {exc}")
+                click.echo(f"  [ERROR] {key} generated an exception: {exc}")
                 results[key] = []
 
     # Reassemble in correct order
@@ -371,7 +371,7 @@ def main(since_days, run_date, max_per_stream, dry_run, lang, workers):
         sections[key] = results.get(key, [])
 
     # Generate TL;DR from the top-relevance items across all sections
-    click.echo("  ▸ generating TL;DR...")
+    click.echo("  -> generating TL;DR...")
     all_items = [item for items in sections.values() for item in items]
     all_items.sort(key=lambda x: x.Relevance or 0, reverse=True)
     tldr = generate_tldr(all_items[:6], lang=lang)
@@ -383,7 +383,7 @@ def main(since_days, run_date, max_per_stream, dry_run, lang, workers):
     output_path.parent.mkdir(parents=True, exist_ok=True)
     output_path.write_text(html, encoding="utf-8")
 
-    click.echo(f"Generated newsletter ({lang}) → {output_path}")
+    click.echo(f"Generated newsletter ({lang}) -> {output_path}")
 
 
 if __name__ == "__main__":
