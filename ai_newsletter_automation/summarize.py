@@ -145,7 +145,7 @@ def summarize_section(
     section_name: str,
     articles: List[VerifiedArticle],
     require_date: bool = False,
-    model: str = "gemini-3-flash-preview",
+    model: str = "gemini-2.0-flash",
     section_key: str = "",
     lang: str = "en",
     relevance_threshold: int = 6,
@@ -221,12 +221,8 @@ def summarize_section(
     if "llama" in model:
         model = "gemini-2.0-flash"
 
-    try:
-        raw = _gemini_request(system_prompt, user_prompt, model_name=model)
-        return _parse_json(raw, relevance_threshold=relevance_threshold)
-    except Exception:
-        # If generation fails, return empty list
-        return []
+    raw = _gemini_request(system_prompt, user_prompt, model_name=model)
+    return _parse_json(raw, relevance_threshold=relevance_threshold)
 
 
 # ── TL;DR Executive Summary ──
