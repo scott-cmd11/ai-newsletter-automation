@@ -258,8 +258,23 @@ async function generateNewsletter() {
             const data = await resp.json();
             allSections[section.key] = data.items || [];
 
-            if (data.warning || (data.items && data.items.length === 0)) {
+            if (data.error) {
+                // Explicit error returned from API
+                console.error(`Section ${section.key} failed:`, data.error);
+                setChipState(section.key, "error");
+                // Show error in a toast or summary? For now, chip is red.
+                // Could also push to a global error list.
+                allSections[section.key] = [];
+                hasErrors = true;
+
+                // If it's a configuration error, alert the user once
+                if (data.error.includes("Missing configuration") && !window._configAlertShown) {
+                    alert(data.error);
+                    window._configAlertShown = true;
+                }
+            } else if (data.warning || (data.items && data.items.length === 0)) {
                 // Section returned but had issues (rate limit, no content)
+                // If 0 items but no error, it might just be empty.
                 setChipState(section.key, "done");
                 if (data.warning) console.warn(`Section ${section.key} warning:`, data.warning);
             } else {

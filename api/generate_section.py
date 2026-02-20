@@ -46,6 +46,24 @@ class handler(BaseHTTPRequestHandler):
             }).encode())
             return
 
+        # Check for critical configuration
+        gemini_key = os.getenv("GEMINI_API_KEY")
+        tavily_key = os.getenv("TAVILY_API_KEY")
+        if not gemini_key or not tavily_key:
+            missing = []
+            if not gemini_key: missing.append("GEMINI_API_KEY")
+            if not tavily_key: missing.append("TAVILY_API_KEY")
+            
+            self.send_response(500)
+            self.send_header("Content-Type", "application/json")
+            self.send_header("Access-Control-Allow-Origin", "*")
+            self.end_headers()
+            self.wfile.write(json.dumps({
+                "error": f"Missing configuration on server: {', '.join(missing)}",
+                "valid_keys": SECTION_ORDER,
+            }).encode())
+            return
+
         try:
             # Apply per-request overrides if provided
             max_per_stream = int(limit_override) if limit_override else None
@@ -77,8 +95,14 @@ class handler(BaseHTTPRequestHandler):
             self.send_header("Content-Type", "application/json")
             self.send_header("Access-Control-Allow-Origin", "*")
             self.end_headers()
+            # Return error so UI can show it
+            self.send_response(200) # Keep 200 so fetch doesn't throw, but return error field
+            self.send_header("Content-Type", "application/json")
+            self.send_header("Access-Control-Allow-Origin", "*")
+            self.end_headers()
             self.wfile.write(json.dumps({
                 "section_key": key,
                 "items": [],
+                "error": str(exc), # Explicit error field
                 "warning": str(exc),
             }).encode())
