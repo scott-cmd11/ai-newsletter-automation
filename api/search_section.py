@@ -1,20 +1,17 @@
-"""Step 1 of 2: Search, scrape, and verify articles for a newsletter section.
+"""Step 1 of 2: Search for articles for a newsletter section.
 
-Returns verified articles (not yet summarized) so the LLM call happens in a
-separate serverless invocation, keeping each function well under the 60-second
-Vercel timeout.
+SERVERLESS-OPTIMIZED: Skips full HTML scraping to stay under 60s.
+Uses Tavily search snippets directly, which are rich enough for LLM
+summarization. Full scraping is only available via the CLI.
 """
 import json
 import sys
 import os
 from http.server import BaseHTTPRequestHandler
 from urllib.parse import urlparse, parse_qs
-from dataclasses import replace
-from datetime import date
 
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), ".."))
 
-from ai_newsletter_automation.config import get_settings
 from ai_newsletter_automation.search import (
     get_streams,
     collect_trending, collect_events, collect_events_public,
@@ -27,15 +24,7 @@ from ai_newsletter_automation.search import (
     _sort_by_source_priority,
     _apply_time_decay,
 )
-from ai_newsletter_automation.runner import (
-    process_hits,
-    _filter_verified_articles_by_date,
-    SECTION_ORDER,
-)
-from ai_newsletter_automation.dedup import deduplicate
-from ai_newsletter_automation.rerank import rerank_articles
-
-from pathlib import Path
+from ai_newsletter_automation.runner import SECTION_ORDER
 
 
 class handler(BaseHTTPRequestHandler):
@@ -69,7 +58,6 @@ class handler(BaseHTTPRequestHandler):
             return
 
         try:
-            settings = get_settings()
             streams = get_streams(custom_limits=int(limit_override) if limit_override else None)
             cfg = streams[key]
 
@@ -85,41 +73,41 @@ class handler(BaseHTTPRequestHandler):
                 "deep_dive": lambda c: collect_deep_dive(c.days or days),
             }
 
-            log_file = Path("/tmp") / "logs" / f"run-{date.today().isoformat()}.jsonl"
-
-            # Collection
+            # Collection (Tavily search — fast, returns snippets)
             if key in collectors:
                 hits = collectors[key](cfg)
             else:
                 hits = search_stream(cfg, cfg.days or days)
 
-            # Curation pipeline
+            # Lightweight curation (no scraping, no verification)
             hits = _filter_by_keywords(hits, cfg.reject_keywords)
             hits = _boost_by_keywords(hits, cfg.boost_keywords)
             hits = _boost_by_source_quality(hits)
             hits = _sort_by_source_priority(hits)
             hits = _apply_time_decay(hits, cfg.days or days)
 
-            # Verification (parallel)
-            verified = process_hits(hits, cfg.limit * 2, log_file)
-            verified = deduplicate(verified)
-            verified = _filter_verified_articles_by_date(verified, cfg.days or days)
-            verified = rerank_articles(verified, cfg)
-            verified = verified[:cfg.limit]
+            # Simple dedup by URL
+            seen_urls = set()
+            unique_hits = []
+            for h in hits:
+                if h.url and h.url not in seen_urls:
+                    seen_urls.add(h.url)
+                    unique_hits.append(h)
+            hits = unique_hits[:cfg.limit]
 
             result = {
                 "section_key": key,
                 "articles": [
                     {
-                        "title": v.title,
-                        "url": v.url,
-                        "snippet": v.snippet or "",
-                        "content": v.content[:4000] if v.content else "",
-                        "published": v.published or "",
+                        "title": h.title or "",
+                        "url": h.url or "",
+                        "snippet": h.snippet or "",
+                        "content": h.snippet or "",  # Use snippet as content
+                        "published": h.published or "",
                     }
-                    for v in verified
+                    for h in hits
                 ],
-                "count": len(verified),
+                "count": len(hits),
             }
 
             self.send_response(200)
