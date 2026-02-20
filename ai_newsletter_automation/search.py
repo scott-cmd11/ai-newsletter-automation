@@ -67,22 +67,7 @@ DEFAULT_STREAMS: Dict[str, SectionConfig] = {
         require_date=True,
         relevance_threshold=5,
     ),
-    "events_public": SectionConfig(
-        name="Public-Servant Events",
-        query='"artificial intelligence" AND (training OR webinar OR course) AND ("Government of Canada" OR "public service" OR CSPS)',
-        limit=4,
-        require_date=True,
-        include_domains=["csps-efpc.gc.ca", "canada.ca"],
-        relevance_threshold=5,
-    ),
-    "agri": SectionConfig(
-        name="Grain / Agri-Tech",
-        query='AI agriculture OR farming OR agtech OR "supply chain" 2026',
-        limit=3,
-        relevance_threshold=4,
-        reject_keywords=["crypto", "blockchain"],
-        boost_keywords=["CGC", "canola", "wheat", "grain logistics", "crop prediction"],
-    ),
+
     "ai_progress": SectionConfig(
         name="AI Progress",
         query='AI language model benchmark state of the art 2026',
@@ -581,55 +566,6 @@ def collect_trending(days: int) -> List[ArticleHit]:
     return _dedupe(hits)
 
 
-# ── Events Public (CSPS) ──
-
-
-CSPS_DOMAINS = ["csps-efpc.gc.ca", "canada.ca"]
-
-
-def collect_events_public(days: int) -> List[ArticleHit]:
-    settings = get_settings()
-    # Try multiple queries for broader coverage of government AI events
-    queries = [
-        {
-            "query": '"artificial intelligence" AND (webinar OR event OR course OR training) site:csps-efpc.gc.ca',
-            "include_domains": CSPS_DOMAINS,
-        },
-        {
-            "query": '"artificial intelligence" AND (training OR course) AND ("Government of Canada" OR "public service")',
-            "include_domains": None,
-        },
-    ]
-    hits: List[ArticleHit] = []
-    for q in queries:
-        payload = {
-            "query": q["query"],
-            "api_key": settings.tavily_api_key,
-            "max_results": 15,
-            "search_depth": "advanced",
-            "include_domains": q.get("include_domains"),
-            "days": days,
-        }
-        try:
-            resp = requests.post("https://api.tavily.com/search", json=payload, timeout=20)
-            resp.raise_for_status()
-            data = resp.json()
-        except Exception:
-            continue
-        for res in data.get("results", []):
-            url = res.get("url", "")
-            if _is_blocked_url(url):
-                continue
-            hits.append(
-                ArticleHit(
-                    title=res.get("title", "").strip(),
-                    url=url,
-                    snippet=res.get("content", "").strip(),
-                    source=res.get("source"),
-                    published=res.get("published_date"),
-                )
-            )
-    return _dedupe(hits)
 
 
 # ── Research Plain ──
@@ -725,16 +661,6 @@ def collect_canadian(days: int) -> List[ArticleHit]:
     hits.extend(search_stream(DEFAULT_STREAMS["canadian"], days))
     return _dedupe(hits)
 
-
-# ── Agriculture / Grain-Tech (Google Alerts + Tavily) ──
-
-
-def collect_agri(days: int) -> List[ArticleHit]:
-    """Prioritise Google Alert RSS for agri-tech news, Tavily as fallback."""
-    hits: List[ArticleHit] = []
-    hits.extend(fetch_google_alerts("agri", limit=15, days=days))
-    hits.extend(search_stream(DEFAULT_STREAMS["agri"], days))
-    return _dedupe(hits)
 
 
 # ── Global News (Google Alerts + Tavily) ──

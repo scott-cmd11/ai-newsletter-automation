@@ -14,9 +14,9 @@ sys.path.insert(0, os.path.join(os.path.dirname(__file__), ".."))
 
 from ai_newsletter_automation.search import (
     get_streams,
-    collect_trending, collect_events, collect_events_public,
+    collect_trending, collect_events,
     collect_research, collect_ai_progress, collect_canadian,
-    collect_agri, collect_global, collect_deep_dive,
+    collect_global, collect_deep_dive,
     search_stream,
     _filter_by_keywords,
     _boost_by_keywords,
@@ -64,11 +64,9 @@ class handler(BaseHTTPRequestHandler):
             collectors = {
                 "trending": lambda c: collect_trending(c.days or days),
                 "events": lambda c: collect_events(c.days or days),
-                "events_public": lambda c: collect_events_public(c.days or days),
                 "research_plain": lambda c: collect_research(c.days or days),
                 "ai_progress": lambda c: collect_ai_progress(c.days or days),
                 "canadian": lambda c: collect_canadian(c.days or days),
-                "agri": lambda c: collect_agri(c.days or days),
                 "global": lambda c: collect_global(c.days or days),
                 "deep_dive": lambda c: collect_deep_dive(c.days or days),
             }

@@ -20,11 +20,9 @@ from .search import (
     search_stream,
     collect_trending,
     collect_events,
-    collect_events_public,
     collect_research,
     collect_ai_progress,
     collect_canadian,
-    collect_agri,
     collect_global,
     collect_deep_dive,
     _filter_by_keywords,
@@ -45,8 +43,6 @@ SECTION_ORDER = [
     "canadian",
     "global",
     "events",
-    "events_public",
-    "agri",
     "ai_progress",
     "research_plain",
     "deep_dive",
@@ -177,11 +173,9 @@ def process_section(key: str, days: int, max_per_stream: Optional[int] = None, l
     collectors: Dict[str, Callable[[SectionConfig], List[ArticleHit]]] = {
         "trending": lambda c: collect_trending(c.days or days),
         "events": lambda c: collect_events(c.days or days),
-        "events_public": lambda c: collect_events_public(c.days or days),
         "research_plain": lambda c: collect_research(c.days or days),
         "ai_progress": lambda c: collect_ai_progress(c.days or days),
         "canadian": lambda c: collect_canadian(c.days or days),
-        "agri": lambda c: collect_agri(c.days or days),
         "global": lambda c: collect_global(c.days or days),
         "deep_dive": lambda c: collect_deep_dive(c.days or days),
     }
@@ -190,8 +184,9 @@ def process_section(key: str, days: int, max_per_stream: Optional[int] = None, l
 
     # Retry loop: Standard -> Expanded Window -> Relaxed Threshold
     # Attempt 0: Standard (days=7, thresh=default)
-    # Vercel Optimization: Limit to 1 attempt to avoid 60s timeout.
-    max_attempts = 1
+    # Vercel Optimization: Originally limited to 1 attempt to avoid 60s timeout.
+    # We are restoring it to 3 to ensure sections populate when standard search yields 0 hits.
+    max_attempts = 3
     
     for attempt in range(max_attempts):
         # Calculate dynamic settings for this attempt
@@ -361,7 +356,10 @@ def main(since_days, run_date, max_per_stream, dry_run, lang, workers):
             try:
                 data = future.result()
                 results[key] = data
-                click.echo(f"  [OK] {key} done")
+                if len(data) == 0:
+                    click.echo(f"  [SKIPPED] {key} returned 0 items")
+                else:
+                    click.echo(f"  [OK] {key} done ({len(data)} items)")
             except Exception as exc:
                 click.echo(f"  [ERROR] {key} generated an exception: {exc}")
                 results[key] = []

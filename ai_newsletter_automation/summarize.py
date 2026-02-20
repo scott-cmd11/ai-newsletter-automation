@@ -65,7 +65,23 @@ def _parse_json(raw: str, relevance_threshold: int = 6) -> List[SummaryItem]:
             cleaned = cleaned[:-3]
         cleaned = cleaned.strip()
 
-    data = json.loads(cleaned)
+    try:
+        data = json.loads(cleaned)
+    except json.JSONDecodeError:
+        # Attempt to auto-close truncated arrays
+        try:
+            if not cleaned.endswith("]"):
+                if cleaned.endswith("}"):
+                    cleaned += "]"
+                elif cleaned.endswith('"'):
+                    cleaned += "}]"
+                else:
+                    cleaned += '"]'
+            data = json.loads(cleaned)
+        except json.JSONDecodeError:
+            print("Warning: LLM returned invalid JSON. Skipping section.")
+            return []
+
     items: List[SummaryItem] = []
     for obj in data:
         relevance = int(obj.get("Relevance", 5))
@@ -169,7 +185,7 @@ def summarize_section(
             "\n- Sentence 2: one concrete implication for government operations "
             "(e.g., 'could reduce manual document review time by…')."
         )
-    elif section_key in {"events_public", "events"}:
+    elif section_key == "events":
         extra_rules = (
             "\n- Format: What event → When (date) → Who it's for → "
             "How to register (if URL available)."
@@ -189,13 +205,7 @@ def summarize_section(
             "\n- Sentence 2: note any direct relevance to Canada's AI strategy "
             "or existing GC directives."
         )
-    elif section_key == "agri":
-        extra_rules = (
-            "\n- Focus on precision agriculture, grain quality AI, crop prediction, "
-            "and supply chain optimization."
-            "\n- Sentence 2: connect to Canadian agricultural priorities "
-            "(CGC, canola, wheat, grain logistics)."
-        )
+
     elif section_key == "deep_dive":
         extra_rules = (
             "\n- These are long-form reports. Summarize the single most important "
