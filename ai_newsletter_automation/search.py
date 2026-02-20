@@ -5,6 +5,7 @@ from typing import Dict, List, Optional, Iterable
 import requests
 import feedparser
 from urllib.parse import urlparse, urlunparse, parse_qs, unquote
+from duckduckgo_search import DDGS
 
 from .config import get_settings
 from .models import ArticleHit, SectionConfig
@@ -76,15 +77,15 @@ DEFAULT_STREAMS: Dict[str, SectionConfig] = {
     ),
     "agri": SectionConfig(
         name="Grain / Agri-Tech",
-        query='("Machine Learning" OR "AI") AND ("Grain Quality" OR Agriculture OR "precision agriculture" OR "crop prediction")',
+        query='AI agriculture OR farming OR agtech OR "supply chain" 2026',
         limit=3,
-        relevance_threshold=5,
-        reject_keywords=["crypto", "blockchain", "NFT", "bitcoin"],
+        relevance_threshold=4,
+        reject_keywords=["crypto", "blockchain"],
         boost_keywords=["CGC", "canola", "wheat", "grain logistics", "crop prediction"],
     ),
     "ai_progress": SectionConfig(
         name="AI Progress",
-        query='"AI model" AND (benchmark OR SOTA OR "state of the art" OR leaderboard) new results',
+        query='AI language model benchmark state of the art 2026',
         limit=3,
         days=14,
         relevance_threshold=6,
@@ -92,7 +93,7 @@ DEFAULT_STREAMS: Dict[str, SectionConfig] = {
     ),
     "research_plain": SectionConfig(
         name="Plain-Language Research",
-        query='AI research breakthrough OR "large language model" new paper OR "machine learning" novel approach 2026',
+        query='AI artificial intelligence new research breakthrough paper 2026',
         limit=3,
         days=14,
         relevance_threshold=5,
@@ -100,7 +101,7 @@ DEFAULT_STREAMS: Dict[str, SectionConfig] = {
     ),
     "deep_dive": SectionConfig(
         name="Deep Dive",
-        query='(OECD OR Anthropic OR MIT OR METR OR NIST OR "World Economic Forum") AND "AI" AND (report OR whitepaper OR framework)',
+        query='AI policy regulation report whitepaper 2026',
         limit=2,
         days=14,
         relevance_threshold=7,
@@ -161,14 +162,17 @@ def _parse_date_str(date_str: Optional[str]) -> Optional[datetime]:
                 "%a, %d %b %Y %H:%M:%S", "%Y-%m-%dT%H:%M:%S%z",
                 "%Y-%m-%dT%H:%M:%SZ"):
         try:
-            return datetime.strptime(date_str.strip()[:25], fmt)
+            dt = datetime.strptime(date_str.strip()[:25], fmt)
+            if dt.tzinfo is not None:
+                dt = dt.astimezone(timezone.utc).replace(tzinfo=None)
+            return dt
         except (ValueError, AttributeError):
             continue
     return None
 
 
 # Sources whose articles are trusted enough to keep even without a date.
-_TRUSTED_SOURCES = {"Google Alert", "arXiv", "PapersWithCode", "RSS"}
+_TRUSTED_SOURCES = {"Google Alert", "arXiv", "PapersWithCode", "RSS", "DuckDuckGo"}
 
 
 def _filter_by_date(hits: List[ArticleHit], days: int) -> List[ArticleHit]:
@@ -309,21 +313,49 @@ def search_stream(section: SectionConfig, days: int) -> List[ArticleHit]:
         "days": days,
     }
 
-    resp = requests.post("https://api.tavily.com/search", json=payload, timeout=20)
-    resp.raise_for_status()
-    data = resp.json()
-
     hits: List[ArticleHit] = []
-    for res in data.get("results", []):
-        hits.append(
-            ArticleHit(
-                title=res.get("title", "").strip(),
-                url=res.get("url", ""),
-                snippet=res.get("content", "").strip(),
-                source=res.get("source"),
-                published=res.get("published_date"),
+
+    try:
+        resp = requests.post("https://api.tavily.com/search", json=payload, timeout=20)
+        resp.raise_for_status()
+        data = resp.json()
+        
+        for res in data.get("results", []):
+            hits.append(
+                ArticleHit(
+                    title=res.get("title", "").strip(),
+                    url=res.get("url", ""),
+                    snippet=res.get("content", "").strip(),
+                    source=res.get("source"),
+                    published=res.get("published_date"),
+                )
             )
-        )
+            
+    except requests.exceptions.HTTPError as e:
+        if e.response.status_code == 432:
+            print(f"  [FALLBACK] Tavily API limit reached (432). Using DuckDuckGo for: {section.name}")
+            try:
+                # Fallback to duckduckgo-search news endpoint
+                ddgs_results = DDGS().news(
+                    keywords=section.query,
+                    max_results=max_results,
+                )
+                for res in ddgs_results:
+                    hits.append(
+                        ArticleHit(
+                            title=res.get("title", "").strip(),
+                            url=res.get("url", ""),
+                            snippet=res.get("body", "").strip(),
+                            source="DuckDuckGo",
+                            published=res.get("date"),
+                        )
+                    )
+            except Exception as ddg_e:
+                print(f"  [ERROR] DuckDuckGo fallback failed for {section.name}: {ddg_e}")
+        else:
+            print(f"  [ERROR] Tavily API error for {section.name}: {e}")
+    except Exception as e:
+        print(f"  [ERROR] Request failed for {section.name}: {e}")
 
     # Post-filter: date + blocked domains (global + section-level excludes)
     hits = _filter_blocked(hits, extra_excludes=section.exclude_domains)
