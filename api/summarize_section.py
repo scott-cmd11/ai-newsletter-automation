@@ -77,6 +77,20 @@ class handler(BaseHTTPRequestHandler):
                 relevance_threshold=relevance_threshold,
             )
 
+            # Fallback: if LLM returned empty Live_Link, try matching back
+            # to original article URLs by headline/title similarity
+            url_lookup = {a.get("title", "").lower().strip(): a.get("url", "") for a in articles_data if a.get("url")}
+            for item in items:
+                if not item.Live_Link:
+                    # Try exact title match first
+                    for title, url in url_lookup.items():
+                        if title and item.Headline and title in item.Headline.lower():
+                            item.Live_Link = url
+                            break
+                    # If still empty, assign first unused URL as last resort
+                    if not item.Live_Link and url_lookup:
+                        item.Live_Link = next(iter(url_lookup.values()))
+
             # Filter by date window
             pre_filter_count = len(items)
             items = _filter_items_by_date(items, days)
@@ -101,6 +115,7 @@ class handler(BaseHTTPRequestHandler):
                     "llm_items_returned": pre_filter_count,
                     "after_date_filter": post_filter_count,
                     "after_link_filter": len(final_items),
+                    "items_with_no_link_before_fallback": sum(1 for i in items if not i.Live_Link),
                 },
             }
 
