@@ -75,56 +75,89 @@ def _log_skipped(reason: str, url: str, log: Path) -> None:
             pass  # Give up silently — logging is non-critical
 
 
-def process_hits(hits: List[ArticleHit], limit: int, log_file: Path) -> List[VerifiedArticle]:
-    verified: List[VerifiedArticle] = []
-    for hit in hits:
-        if len(verified) >= limit:
-            break
-        if not hit.url:
-            _log_skipped("missing_url", "", log_file)
-            continue
-        html = verify_link(hit.url)
-        if html is None:
-            # Link unreachable — but if we have a good RSS snippet, use it
-            if hit.snippet and len(hit.snippet) > 80:
-                _log_skipped("verify_failed_using_snippet", hit.url, log_file)
-                verified.append(
-                    VerifiedArticle(
-                        title=hit.title,
-                        url=hit.url,
-                        snippet=hit.snippet,
-                        content=hit.snippet,
-                        published=hit.published,
-                    )
-                )
-            else:
-                _log_skipped("verify_failed", hit.url, log_file)
-            continue
-        content = scrape(hit.url, html=html)
-        if not content:
-            # Scrape failed — fall back to RSS snippet
-            if hit.snippet and len(hit.snippet) > 40:
-                _log_skipped("scrape_failed_using_snippet", hit.url, log_file)
-                content = hit.snippet
-            else:
-                _log_skipped("scrape_failed", hit.url, log_file)
-                continue
-        
-        # Extract metadata (date)
-        meta = extract_metadata(html)
-        scraped_date = meta.get("date")
+def _process_single_hit(hit: ArticleHit, log_file: Path) -> Optional[VerifiedArticle]:
+    if not hit.url:
+        _log_skipped("missing_url", "", log_file)
+        return None
 
-        verified.append(
-            VerifiedArticle(
+    try:
+        html = verify_link(hit.url)
+    except Exception:
+        html = None
+
+    if html is None:
+        # Link unreachable — but if we have a good RSS snippet, use it
+        if hit.snippet and len(hit.snippet) > 80:
+            _log_skipped("verify_failed_using_snippet", hit.url, log_file)
+            return VerifiedArticle(
                 title=hit.title,
                 url=hit.url,
                 snippet=hit.snippet,
-                content=content,
+                content=hit.snippet,
                 published=hit.published,
-                scraped_published_date=scraped_date,
             )
-        )
-    return verified
+        else:
+            _log_skipped("verify_failed", hit.url, log_file)
+        return None
+
+    try:
+        content = scrape(hit.url, html=html)
+    except Exception:
+        content = None
+        
+    if not content:
+        # Scrape failed — fall back to RSS snippet
+        if hit.snippet and len(hit.snippet) > 40:
+            _log_skipped("scrape_failed_using_snippet", hit.url, log_file)
+            content = hit.snippet
+        else:
+            _log_skipped("scrape_failed", hit.url, log_file)
+            return None
+    
+    # Extract metadata (date)
+    try:
+        meta = extract_metadata(html)
+        scraped_date = meta.get("date")
+    except Exception:
+        scraped_date = None
+
+    return VerifiedArticle(
+        title=hit.title,
+        url=hit.url,
+        snippet=hit.snippet,
+        content=content,
+        published=hit.published,
+        scraped_published_date=scraped_date,
+    )
+
+
+def process_hits(hits: List[ArticleHit], limit: int, log_file: Path) -> List[VerifiedArticle]:
+    verified: List[VerifiedArticle] = []
+    
+    # Parallelize verification to avoid 60s timeout
+    # Max 10 threads is a good balance for Vercel
+    with concurrent.futures.ThreadPoolExecutor(max_workers=10) as executor:
+        # Submit candidate tasks (fetch a bit more than limit to ensure we fill it)
+        candidates = hits[:limit * 3]
+        future_to_hit = {
+            executor.submit(_process_single_hit, hit, log_file): hit 
+            for hit in candidates
+        }
+        
+        for future in concurrent.futures.as_completed(future_to_hit):
+            try:
+                result = future.result()
+                if result:
+                    verified.append(result)
+                    
+                    # If we reached the limit, we can stop
+                    if len(verified) >= limit:
+                        break
+            except Exception as e:
+                # Log exception but don't crash
+                _log_skipped(f"exception_{type(e).__name__}", "", log_file)
+                
+    return verified[:limit]
 
 
 def process_section(key: str, days: int, max_per_stream: Optional[int] = None, lang: str = "en") -> List[SummaryItem]:

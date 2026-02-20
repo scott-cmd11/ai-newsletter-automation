@@ -46,7 +46,7 @@ def is_soft_404(html: str) -> bool:
     return any(phrase in haystack for phrase in SOFT_404_PHRASES)
 
 
-def verify_link(url: str, timeout: int = 8) -> Optional[str]:
+def verify_link(url: str, timeout: int = 4) -> Optional[str]:
     """Fetch *url* and return the HTML if the page is reachable, is HTML,
     has enough content, and is not behind a paywall or soft-404.
     Returns ``None`` on any failure so that the caller can skip the article."""
