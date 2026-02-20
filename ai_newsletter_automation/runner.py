@@ -190,9 +190,8 @@ def process_section(key: str, days: int, max_per_stream: Optional[int] = None, l
 
     # Retry loop: Standard -> Expanded Window -> Relaxed Threshold
     # Attempt 0: Standard (days=7, thresh=default)
-    # Attempt 1: Expanded (days=14, thresh=default)
-    # Attempt 2: Wide & Relaxed (days=28, thresh=lowered)
-    max_attempts = 3
+    # Vercel Optimization: Limit to 1 attempt to avoid 60s timeout.
+    max_attempts = 1
     
     for attempt in range(max_attempts):
         # Calculate dynamic settings for this attempt

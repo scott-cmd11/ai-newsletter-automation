@@ -123,8 +123,10 @@ def _gemini_request(
     )
 
     # Retry logic for rate limits (429) & server errors (500/503)
-    max_retries = 5
-    base_delay = 5
+    # Retry logic for rate limits (429) & server errors (500/503)
+    # Fast Fail for Vercel: Reduce retries to avoid timeouts (60s limit)
+    max_retries = 2
+    base_delay = 2
 
     for attempt in range(max_retries):
         try:
