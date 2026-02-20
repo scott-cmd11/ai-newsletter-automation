@@ -171,6 +171,7 @@ function initProgress() {
     ).join("");
 
     $("progress-bar").style.width = "0%";
+    $("progress-pct").textContent = "0%";
     $("progress-count").textContent = `0 / ${SECTIONS.length}`;
     $("progress-text").textContent = "Starting generation…";
     $("progress-time").textContent = "Est. 3–5 min";
@@ -211,8 +212,9 @@ function _updateTimer() {
 }
 
 function updateProgress(completed, currentLabel) {
-    const pct = (completed / SECTIONS.length) * 100;
+    const pct = Math.round((completed / SECTIONS.length) * 100);
     $("progress-bar").style.width = pct + "%";
+    $("progress-pct").textContent = pct + "%";
     $("progress-count").textContent = `${completed} / ${SECTIONS.length}`;
     $("progress-text").textContent = currentLabel
         ? `Generating: ${currentLabel}…`

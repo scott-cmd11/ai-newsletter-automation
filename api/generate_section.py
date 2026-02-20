@@ -95,14 +95,9 @@ class handler(BaseHTTPRequestHandler):
             self.send_header("Content-Type", "application/json")
             self.send_header("Access-Control-Allow-Origin", "*")
             self.end_headers()
-            # Return error so UI can show it
-            self.send_response(200) # Keep 200 so fetch doesn't throw, but return error field
-            self.send_header("Content-Type", "application/json")
-            self.send_header("Access-Control-Allow-Origin", "*")
-            self.end_headers()
             self.wfile.write(json.dumps({
                 "section_key": key,
                 "items": [],
-                "error": str(exc), # Explicit error field
+                "error": str(exc),
                 "warning": str(exc),
             }).encode())
