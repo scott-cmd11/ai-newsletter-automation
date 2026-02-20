@@ -244,39 +244,72 @@ async function generateNewsletter() {
 
         // Build query params with tuning overrides
         const overrides = getTuningOverrides(section.key);
-        let url = `/api/generate_section?key=${section.key}&days=${overrides.days || globalDays}&lang=${lang}`;
-        if (overrides.limit) url += `&limit=${overrides.limit}`;
-        if (overrides.threshold) url += `&relevance_threshold=${overrides.threshold}`;
+        const sectionDays = overrides.days || globalDays;
 
         try {
-            const resp = await fetch(url);
-            if (!resp.ok) {
-                const err = await resp.json().catch(() => ({ error: resp.statusText }));
-                throw new Error(err.error || `HTTP ${resp.status}`);
+            // ── Step 1: Search + Scrape + Verify ──
+            let searchUrl = `/api/search_section?key=${section.key}&days=${sectionDays}&lang=${lang}`;
+            if (overrides.limit) searchUrl += `&limit=${overrides.limit}`;
+
+            const searchResp = await fetch(searchUrl);
+            if (!searchResp.ok) {
+                const err = await searchResp.json().catch(() => ({ error: searchResp.statusText }));
+                throw new Error(err.error || `Search HTTP ${searchResp.status}`);
             }
 
-            const data = await resp.json();
+            const searchData = await searchResp.json();
+
+            if (searchData.error) {
+                throw new Error(searchData.error);
+            }
+
+            if (!searchData.articles || searchData.articles.length === 0) {
+                // No articles found — mark as done with 0 items
+                allSections[section.key] = [];
+                setChipState(section.key, "done");
+                if (searchData.error) console.warn(`Section ${section.key}:`, searchData.error);
+                completed++;
+                _sectionTimes.push(Date.now() - _sectionStart);
+                _sectionStart = Date.now();
+                _updateTimer();
+                updateProgress(completed, completed < SECTIONS.length ? SECTIONS[completed]?.label : null);
+                continue;
+            }
+
+            // ── Step 2: Summarize with LLM ──
+            const sumResp = await fetch("/api/summarize_section", {
+                method: "POST",
+                headers: { "Content-Type": "application/json" },
+                body: JSON.stringify({
+                    key: section.key,
+                    section_name: section.label,
+                    lang: lang,
+                    days: sectionDays,
+                    relevance_threshold: overrides.threshold || 6,
+                    articles: searchData.articles,
+                }),
+            });
+
+            if (!sumResp.ok) {
+                const err = await sumResp.json().catch(() => ({ error: sumResp.statusText }));
+                throw new Error(err.error || `Summarize HTTP ${sumResp.status}`);
+            }
+
+            const data = await sumResp.json();
             allSections[section.key] = data.items || [];
 
             if (data.error) {
-                // Explicit error returned from API
                 console.error(`Section ${section.key} failed:`, data.error);
                 setChipState(section.key, "error");
-                // Show error in a toast or summary? For now, chip is red.
-                // Could also push to a global error list.
                 allSections[section.key] = [];
                 hasErrors = true;
 
-                // If it's a configuration error, alert the user once
-                if (data.error.includes("Missing configuration") && !window._configAlertShown) {
+                if (data.error.includes("Missing") && !window._configAlertShown) {
                     alert(data.error);
                     window._configAlertShown = true;
                 }
-            } else if (data.warning || (data.items && data.items.length === 0)) {
-                // Section returned but had issues (rate limit, no content)
-                // If 0 items but no error, it might just be empty.
+            } else if (data.items && data.items.length === 0) {
                 setChipState(section.key, "done");
-                if (data.warning) console.warn(`Section ${section.key} warning:`, data.warning);
             } else {
                 setChipState(section.key, "done");
             }
