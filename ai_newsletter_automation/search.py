@@ -414,7 +414,9 @@ CURATED_FEEDS = [
     "https://blog.openai.com/rss/",
     "https://www.anthropic.com/feed",                       # Anthropic
     "https://blog.google/technology/ai/rss/",               # Google AI
+    "https://deepmind.google/blog/rss/",                    # Google DeepMind
     "https://blogs.microsoft.com/ai/feed/",                 # Microsoft AI
+    "https://www.microsoft.com/en-us/research/feed/",       # Microsoft Research
     "https://www.technologyreview.com/feed/",               # MIT Tech Review
     "https://ai.meta.com/blog/rss/",                        # Meta AI
     "https://blog.research.google/feeds/posts/default",     # Google Research
@@ -442,17 +444,6 @@ GOOGLE_ALERT_FEEDS: Dict[str, List[str]] = {
         "https://www.google.com/alerts/feeds/03030665084568507357/16866512384761599386",      # Privacy - AI
         "https://www.google.com/alerts/feeds/03030665084568507357/7622957089141856354",       # Regulation - AI
         "https://www.google.com/alerts/feeds/03030665084568507357/15942459126004772098",      # Security - AI
-    ],
-    "agri": [
-        "https://www.google.com/alerts/feeds/03030665084568507357/15755737833312608799",      # Agriculture - AI
-        "https://www.google.com/alerts/feeds/03030665084568507357/3281559451078185126",       # Crops - AI
-        "https://www.google.com/alerts/feeds/03030665084568507357/5761797510369087166",       # Grain - AI
-        "https://www.google.com/alerts/feeds/03030665084568507357/9368672943932362999",       # Grain Industry - AI
-        "https://www.google.com/alerts/feeds/03030665084568507357/12957642636281638741",      # Oil seeds - AI
-        "https://www.google.com/alerts/feeds/03030665084568507357/12957642636281637464",      # Wheat - AI
-        "https://www.google.com/alerts/feeds/03030665084568507357/14624198102712688249",      # Canadian Grain Commission
-        "https://www.google.com/alerts/feeds/03030665084568507357/13610686801601706073",      # Canadian Grain Industry
-        "https://www.google.com/alerts/feeds/03030665084568507357/17711904352499016105",      # Grain Discovery/Inarix
     ],
 }
 
