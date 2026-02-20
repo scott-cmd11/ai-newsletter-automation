@@ -77,7 +77,7 @@ DEFAULT_STREAMS: Dict[str, SectionConfig] = {
         boost_keywords=["benchmark", "SOTA", "leaderboard", "accuracy"],
     ),
     "research_plain": SectionConfig(
-        name="Plain-Language Research",
+        name="AI Research",
         query='AI artificial intelligence new research breakthrough paper 2026',
         limit=3,
         days=14,

@@ -38,7 +38,7 @@ def test_render_uses_correct_display_names():
     html = render_newsletter(sections, run_date="2026-02-18")
     assert "AI Progress" in html
     assert "Ai Progress" not in html
-    assert "Plain-Language Research" in html
+    assert "AI Research" in html
     assert "Research Plain" not in html
 
 

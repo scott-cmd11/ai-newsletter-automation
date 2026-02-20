@@ -20,7 +20,7 @@ SECTION_LABELS_FR: Dict[str, str] = {
     "global": "Nouvelles internationales",
     "events": "Événements",
     "ai_progress": "Progrès en IA",
-    "research_plain": "Recherche vulgarisée",
+    "research_plain": "Recherche en IA",
     "deep_dive": "Analyse approfondie",
 }
 
@@ -30,7 +30,7 @@ SECTION_DESCRIPTIONS: Dict[str, str] = {
     "global": "International AI governance, regulation, and workforce policy.",
     "events": "Upcoming AI conferences, summits, and workshops.",
     "ai_progress": "Notable benchmark results and technical capability milestones.",
-    "research_plain": "Cutting-edge research explained in plain language.",
+    "research_plain": "Cutting-edge AI research and breakthroughs.",
     "deep_dive": "In-depth reports and analyses from leading AI organizations.",
 }
 
@@ -40,7 +40,7 @@ SECTION_DESCRIPTIONS_FR: Dict[str, str] = {
     "global": "Gouvernance, réglementation et politiques internationales en matière d'IA.",
     "events": "Conférences, sommets et ateliers en IA à venir.",
     "ai_progress": "Résultats de référence et jalons techniques notables.",
-    "research_plain": "Recherche de pointe expliquée en langage simple.",
+    "research_plain": "Recherche de pointe et percées en IA.",
     "deep_dive": "Rapports et analyses approfondis des grandes organisations en IA.",
 }
 

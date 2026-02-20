@@ -8,7 +8,7 @@ const SECTIONS = [
     { key: "global", label: "Global News" },
     { key: "events", label: "Events" },
     { key: "ai_progress", label: "AI Progress" },
-    { key: "research_plain", label: "Plain-Language Research" },
+    { key: "research_plain", label: "AI Research" },
     { key: "deep_dive", label: "Deep Dive" },
 ];
 
