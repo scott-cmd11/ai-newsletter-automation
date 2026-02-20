@@ -238,7 +238,12 @@ async function generateNewsletter() {
     let hasErrors = false;
     let _sectionStart = Date.now();
 
-    for (const section of SECTIONS) {
+    // Rate-limit delay helper (Gemini free tier: ~15 RPM)
+    const RATE_LIMIT_DELAY_MS = 15000;
+    const sleep = (ms) => new Promise(r => setTimeout(r, ms));
+
+    for (let si = 0; si < SECTIONS.length; si++) {
+        const section = SECTIONS[si];
         setChipState(section.key, "active");
         updateProgress(completed, section.label);
 
@@ -247,7 +252,7 @@ async function generateNewsletter() {
         const sectionDays = overrides.days || globalDays;
 
         try {
-            // ── Step 1: Search + Scrape + Verify ──
+            // ── Step 1: Search (fast, no LLM) ──
             let searchUrl = `/api/search_section?key=${section.key}&days=${sectionDays}&lang=${lang}`;
             if (overrides.limit) searchUrl += `&limit=${overrides.limit}`;
 
@@ -264,10 +269,8 @@ async function generateNewsletter() {
             }
 
             if (!searchData.articles || searchData.articles.length === 0) {
-                // No articles found — mark as done with 0 items
                 allSections[section.key] = [];
                 setChipState(section.key, "done");
-                if (searchData.error) console.warn(`Section ${section.key}:`, searchData.error);
                 completed++;
                 _sectionTimes.push(Date.now() - _sectionStart);
                 _sectionStart = Date.now();
@@ -277,25 +280,38 @@ async function generateNewsletter() {
             }
 
             // ── Step 2: Summarize with LLM ──
-            const sumResp = await fetch("/api/summarize_section", {
-                method: "POST",
-                headers: { "Content-Type": "application/json" },
-                body: JSON.stringify({
-                    key: section.key,
-                    section_name: section.label,
-                    lang: lang,
-                    days: sectionDays,
-                    relevance_threshold: overrides.threshold || 6,
-                    articles: searchData.articles,
-                }),
-            });
+            const summarizeOnce = async () => {
+                const sumResp = await fetch("/api/summarize_section", {
+                    method: "POST",
+                    headers: { "Content-Type": "application/json" },
+                    body: JSON.stringify({
+                        key: section.key,
+                        section_name: section.label,
+                        lang: lang,
+                        days: sectionDays,
+                        relevance_threshold: overrides.threshold || 6,
+                        articles: searchData.articles,
+                    }),
+                });
 
-            if (!sumResp.ok) {
-                const err = await sumResp.json().catch(() => ({ error: sumResp.statusText }));
-                throw new Error(err.error || `Summarize HTTP ${sumResp.status}`);
+                if (!sumResp.ok) {
+                    const err = await sumResp.json().catch(() => ({ error: sumResp.statusText }));
+                    throw new Error(err.error || `Summarize HTTP ${sumResp.status}`);
+                }
+
+                return await sumResp.json();
+            };
+
+            let data = await summarizeOnce();
+
+            // If rate-limited (error contains "429"), wait and retry once
+            if (data.error && data.error.includes("429")) {
+                console.warn(`Section ${section.key} rate-limited. Waiting ${RATE_LIMIT_DELAY_MS / 1000}s and retrying...`);
+                $("progress-text").textContent = `Rate limited — cooling down (${RATE_LIMIT_DELAY_MS / 1000}s)…`;
+                await sleep(RATE_LIMIT_DELAY_MS);
+                data = await summarizeOnce();
             }
 
-            const data = await sumResp.json();
             allSections[section.key] = data.items || [];
 
             if (data.error) {
@@ -325,6 +341,15 @@ async function generateNewsletter() {
         _sectionStart = Date.now();
         _updateTimer();
         updateProgress(completed, completed < SECTIONS.length ? SECTIONS[completed]?.label : null);
+
+        // ── Rate-limit cooldown between sections (skip after last) ──
+        if (si < SECTIONS.length - 1) {
+            const nextLabel = SECTIONS[si + 1]?.label || "next section";
+            for (let countdown = Math.ceil(RATE_LIMIT_DELAY_MS / 1000); countdown > 0; countdown--) {
+                $("progress-text").textContent = `Cooling down before ${nextLabel}… ${countdown}s`;
+                await sleep(1000);
+            }
+        }
     }
 
     // Render the full newsletter
