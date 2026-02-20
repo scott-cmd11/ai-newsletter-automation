@@ -96,7 +96,7 @@ def _configure_gemini():
 def _gemini_request(
     system_prompt: str,
     user_prompt: str,
-    model_name: str = "gemini-1.5-flash",
+    model_name: str = "gemini-3-flash-preview",
     temperature: float = 0.1,
 ) -> str:
     _configure_gemini()
@@ -145,7 +145,7 @@ def summarize_section(
     section_name: str,
     articles: List[VerifiedArticle],
     require_date: bool = False,
-    model: str = "gemini-1.5-flash",
+    model: str = "gemini-3-flash-preview",
     section_key: str = "",
     lang: str = "en",
     relevance_threshold: int = 6,
@@ -219,7 +219,7 @@ def summarize_section(
 
     # Default to Gemini 2.0 Flash if unspecified or old model name passed
     if "llama" in model:
-        model = "gemini-1.5-flash"
+        model = "gemini-3-flash-preview"
 
     raw = _gemini_request(system_prompt, user_prompt, model_name=model)
     return _parse_json(raw, relevance_threshold=relevance_threshold)
@@ -242,7 +242,7 @@ _TLDR_FRENCH_MODIFIER = "\n- Write ALL bullets in fluent, professional Canadian 
 
 def generate_tldr(
     top_items: List[SummaryItem],
-    model: str = "gemini-1.5-flash",
+    model: str = "gemini-3-flash-preview",
     lang: str = "en",
 ) -> List[str]:
     """Generate 3-bullet TL;DR from the highest-relevance newsletter items."""
@@ -259,7 +259,7 @@ def generate_tldr(
         sys_prompt += _TLDR_FRENCH_MODIFIER
 
     if "llama" in model:
-        model = "gemini-1.5-flash"
+        model = "gemini-3-flash-preview"
 
     try:
         raw = _gemini_request(sys_prompt, user_prompt, model_name=model)
