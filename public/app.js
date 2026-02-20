@@ -338,7 +338,6 @@ async function generateNewsletter() {
 
         completed++;
         _sectionTimes.push(Date.now() - _sectionStart);
-        _sectionStart = Date.now();
         _updateTimer();
         updateProgress(completed, completed < SECTIONS.length ? SECTIONS[completed]?.label : null);
 
@@ -350,6 +349,8 @@ async function generateNewsletter() {
                 await sleep(1000);
             }
         }
+        // Reset section start AFTER cooldown so next section timing is clean
+        _sectionStart = Date.now();
     }
 
     // Render the full newsletter
