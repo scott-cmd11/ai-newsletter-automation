@@ -78,7 +78,9 @@ class handler(BaseHTTPRequestHandler):
             )
 
             # Filter by date window
+            pre_filter_count = len(items)
             items = _filter_items_by_date(items, days)
+            post_filter_count = len(items)
             final_items = [item for item in items if item.Live_Link]
 
             result = {
@@ -94,6 +96,12 @@ class handler(BaseHTTPRequestHandler):
                     }
                     for item in final_items
                 ],
+                "debug": {
+                    "articles_received": len(verified),
+                    "llm_items_returned": pre_filter_count,
+                    "after_date_filter": post_filter_count,
+                    "after_link_filter": len(final_items),
+                },
             }
 
             self.send_response(200)
